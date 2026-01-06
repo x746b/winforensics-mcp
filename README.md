@@ -30,7 +30,7 @@ python3 --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/winforensics-mcp.git
+https://github.com/x746b/winforensics-mcp.git
 cd winforensics-mcp
 
 # Create virtual environment and install
