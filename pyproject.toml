@@ -1,0 +1,58 @@
+[project]
+name = "winforensics-mcp"
+version = "0.1.0"
+description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, and remote artifact collection for DFIR"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "xtk" }]
+requires-python = ">=3.10"
+keywords = ["mcp", "forensics", "dfir", "evtx", "registry", "windows", "incident-response"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+    "python-evtx>=0.7.0",
+    "python-registry>=1.3.0",
+    "python-dateutil>=2.8.2",
+]
+
+[project.optional-dependencies]
+remote = [
+    "pywinrm>=0.4.3",
+    "paramiko>=3.4.0",
+    "smbprotocol>=1.12.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+winforensics-mcp = "winforensics_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["winforensics_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=winforensics_mcp"
