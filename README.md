@@ -91,6 +91,15 @@ claude mcp list
 ```
 
 ---
+## Adding to Gemini CLI
+
+### Method 1: Using `gemini mcp add` (Recommended)
+
+```bash
+gemini mcp add winforensics-mcp "uv" --scope user -- run --directory /opt/winforensics-mcp python -m winforensics_mcp.server
+```
+
+---
 
 ## Tool Reference
 
