@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="icon.png" width="150" alt="WinForensics MCP">
-</p>
+<img src="icon.png" width="150" alt="WinForensics MCP">
 
 # Windows Forensics MCP Server
 
