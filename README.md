@@ -18,8 +18,6 @@ Traditional Windows forensics often requires:
 - **No Windows Required** - Analyze Windows disk images directly from your Linux forensics workstation
 - **No Wine/Mono Hacks** - Pure Python implementations using battle-tested open-source libraries
 - **AI-Assisted Analysis** - Integrates with Claude CLI and any MCP-compatible client for intelligent artifact correlation
-- **CTF & HTB Ready** - Perfect for HackTheBox Sherlocks, CTF challenges, and incident response labs
-
 ---
 
 ## Features
