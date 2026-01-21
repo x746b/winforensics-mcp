@@ -49,7 +49,7 @@ from .parsers import (
     ingest_csv,
 )
 
-from .orchestrators import investigate_execution, build_timeline, hunt_ioc
+from .orchestrators import investigate_execution, build_timeline, hunt_ioc, investigate_user_activity
 
 from .collectors import (
     WinRMCollector,
@@ -579,6 +579,66 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["ioc", "artifacts_dir"],
+            },
+        )
+    )
+
+    # User Activity Investigation orchestrator
+    tools.append(
+        Tool(
+            name="investigate_user_activity",
+            description="Comprehensive user activity investigation. Correlates Browser History, ShellBags, LNK files, and RecentDocs to build a complete picture of user activity. Answers: What did the user browse? What files did they access? What folders did they navigate?",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artifacts_dir": {
+                        "type": "string",
+                        "description": "Base directory containing forensic artifacts or user profile",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "Optional keyword to search across all sources (URLs, filenames, paths)",
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "Optional username to narrow artifact search in multi-user images",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events before this time",
+                    },
+                    "suspicious_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "For ShellBags, only return suspicious folder access (temp, AppData, network shares)",
+                    },
+                    "browser_path": {
+                        "type": "string",
+                        "description": "Override auto-detected browser History path",
+                    },
+                    "lnk_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Recent LNK folder path",
+                    },
+                    "usrclass_path": {
+                        "type": "string",
+                        "description": "Override auto-detected UsrClass.dat path",
+                    },
+                    "ntuser_path": {
+                        "type": "string",
+                        "description": "Override auto-detected NTUSER.DAT path",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Maximum results per source",
+                    },
+                },
+                "required": ["artifacts_dir"],
             },
         )
     )
@@ -1123,6 +1183,22 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             mft_path=args.get("mft_path"),
             usn_path=args.get("usn_path"),
             evtx_path=args.get("evtx_path"),
+        )
+        return json_response(result)
+
+    elif name == "investigate_user_activity":
+        result = investigate_user_activity(
+            artifacts_dir=args["artifacts_dir"],
+            keyword=args.get("keyword"),
+            username=args.get("username"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            suspicious_only=args.get("suspicious_only", False),
+            browser_path=args.get("browser_path"),
+            lnk_path=args.get("lnk_path"),
+            usrclass_path=args.get("usrclass_path"),
+            ntuser_path=args.get("ntuser_path"),
+            limit=args.get("limit", 50),
         )
         return json_response(result)
 
