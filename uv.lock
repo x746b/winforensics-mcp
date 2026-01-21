@@ -666,6 +666,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mft"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/4a/83f4ddb5055160d1d3f0dd30fe547be3e603c832ee21c9f59b4be6ad389e/mft-0.7.0.tar.gz", hash = "sha256:9ad92666ac360a23af70046bd569fa49ddd931ab534803f554f877e99ff30b6a", size = 1255786, upload-time = "2025-12-23T21:31:23.858Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/7d/075bd2b0e9118aba47412c03115ffc4b8af057b03e8ef03125989023c0b6/mft-0.7.0-cp37-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:5fa1f2c4ce562b2a0536024407b06dfe7d7e7bf120c58d6c0a1b6f540058e9a2", size = 792596, upload-time = "2025-12-23T21:31:18.423Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/67/092ba7a58cf9e4e7ec73e7210ddbe5da1340fcbbedd8569d647790ca66c2/mft-0.7.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0b5634e8c4d0e6225d2137cf254d70c08d384380302ae76036929e189699f304", size = 369399, upload-time = "2025-12-23T21:31:19.982Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/be/40bb1bb783e1440cfe200da65be7335e93be51ba3a6fdfc97f90036579d1/mft-0.7.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e6fd8c7c1aacc98438920ac4c5c564048db14b4022e00c53fd5339ae58b872a", size = 447410, upload-time = "2025-12-23T21:31:20.989Z" },
+    { url = "https://files.pythonhosted.org/packages/94/cf/0225d5cb9f56079da7f86a87d3e6a95fe1f5701638e37edeef7e81cf07c4/mft-0.7.0-cp37-abi3-win_amd64.whl", hash = "sha256:4fac937d8148a0d8b62bb042bf1cdb0064301234c60764bb24398f426798359a", size = 277370, upload-time = "2025-12-23T21:31:22.559Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1425,6 +1437,7 @@ dependencies = [
     { name = "libesedb-python" },
     { name = "libscca-python" },
     { name = "mcp" },
+    { name = "mft" },
     { name = "pefile" },
     { name = "python-dateutil" },
     { name = "python-evtx" },
@@ -1448,6 +1461,7 @@ requires-dist = [
     { name = "libesedb-python", specifier = ">=20240420" },
     { name = "libscca-python", specifier = ">=20240427" },
     { name = "mcp", specifier = ">=1.0.0" },
+    { name = "mft", specifier = ">=0.7.0" },
     { name = "paramiko", marker = "extra == 'remote'", specifier = ">=3.4.0" },
     { name = "pefile", specifier = ">=2023.2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },

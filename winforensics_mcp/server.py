@@ -32,9 +32,15 @@ from .parsers import (
     parse_amcache,
     parse_srum,
     PYESEDB_AVAILABLE,
+    parse_mft,
+    find_timestomped_files,
+    MFT_AVAILABLE,
+    parse_usn_journal,
+    find_deleted_files,
+    get_file_operations_summary,
 )
 
-from .orchestrators import investigate_execution
+from .orchestrators import investigate_execution, build_timeline
 
 from .collectors import (
     WinRMCollector,
@@ -434,6 +440,191 @@ async def list_tools() -> list[Tool]:
         )
     )
 
+    # Timeline builder orchestrator
+    tools.append(
+        Tool(
+            name="build_timeline",
+            description="Build comprehensive forensic timeline from multiple artifact sources (MFT, USN Journal, Prefetch, Amcache, EVTX). Returns sorted, deduplicated events. Answers: What happened and when? Provides unified chronological view of system activity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artifacts_dir": {
+                        "type": "string",
+                        "description": "Base directory containing forensic artifacts. Tool will auto-detect common paths for MFT, USN, Prefetch, etc.",
+                    },
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["mft", "usn", "prefetch", "amcache", "evtx"],
+                        },
+                        "default": ["mft", "usn", "prefetch", "amcache"],
+                        "description": "List of sources to include in timeline",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - include events after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - include events before this time",
+                    },
+                    "keyword_filter": {
+                        "type": "string",
+                        "description": "Filter events containing this keyword (case-insensitive)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 1000,
+                        "description": "Maximum number of events to return",
+                    },
+                    "mft_path": {
+                        "type": "string",
+                        "description": "Override auto-detected $MFT path",
+                    },
+                    "usn_path": {
+                        "type": "string",
+                        "description": "Override auto-detected USN Journal path",
+                    },
+                    "prefetch_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Prefetch directory path",
+                    },
+                    "amcache_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Amcache.hve path",
+                    },
+                    "evtx_path": {
+                        "type": "string",
+                        "description": "Override auto-detected EVTX directory path",
+                    },
+                },
+                "required": ["artifacts_dir"],
+            },
+        )
+    )
+
+    # MFT parsing tool (if mft library available)
+    if MFT_AVAILABLE:
+        tools.append(
+            Tool(
+                name="disk_parse_mft",
+                description="Parse $MFT (Master File Table) for file metadata and timestomping detection. Compares $STANDARD_INFORMATION and $FILE_NAME timestamps to identify manipulation. Answers: When was this file actually created? Has it been timestomped?",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "mft_path": {
+                            "type": "string",
+                            "description": "Path to $MFT file",
+                        },
+                        "file_path_filter": {
+                            "type": "string",
+                            "description": "Filter by file path (case-insensitive substring)",
+                        },
+                        "entry_number": {
+                            "type": "integer",
+                            "description": "Get specific MFT entry by number",
+                        },
+                        "detect_timestomping": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Flag files where $SI timestamps are earlier than $FN timestamps",
+                        },
+                        "output_mode": {
+                            "type": "string",
+                            "enum": ["full", "summary", "timestomping_only"],
+                            "default": "summary",
+                            "description": "Output mode: full (all data), summary (basic info), timestomping_only (only flagged files)",
+                        },
+                        "allocated_only": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Only return allocated (not deleted) entries",
+                        },
+                        "files_only": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Only return files (exclude directories)",
+                        },
+                        "time_range_start": {
+                            "type": "string",
+                            "description": "ISO format datetime - filter entries modified after this time",
+                        },
+                        "time_range_end": {
+                            "type": "string",
+                            "description": "ISO format datetime - filter entries modified before this time",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum number of entries to return",
+                        },
+                    },
+                    "required": ["mft_path"],
+                },
+            )
+        )
+
+    # USN Journal parsing tool (pure Python, always available)
+    tools.append(
+        Tool(
+            name="disk_parse_usn_journal",
+            description="Parse $UsnJrnl:$J (USN Journal) for file system change history. Records file creation, deletion, modification, and rename operations. Answers: What files were created/deleted/renamed? When did file changes occur?",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "usn_path": {
+                        "type": "string",
+                        "description": "Path to $J file (typically $Extend/$J)",
+                    },
+                    "filename_filter": {
+                        "type": "string",
+                        "description": "Filter by filename (case-insensitive substring)",
+                    },
+                    "reason_filter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by reason types (e.g., FILE_CREATE, FILE_DELETE, RENAME_NEW_NAME)",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events before this time",
+                    },
+                    "interesting_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Only return forensically interesting changes (create, delete, rename, modify)",
+                    },
+                    "files_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Only return file events (exclude directories)",
+                    },
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["records", "summary", "deleted_files"],
+                        "default": "records",
+                        "description": "Output mode: records (individual changes), summary (statistics), deleted_files (only deletions)",
+                    },
+                    "extension_filter": {
+                        "type": "string",
+                        "description": "Filter by file extension (for deleted_files mode)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum number of records to return",
+                    },
+                },
+                "required": ["usn_path"],
+            },
+        )
+    )
+
     if WINRM_AVAILABLE:
         tools.extend([
             Tool(
@@ -652,6 +843,69 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             amcache_path=args.get("amcache_path"),
             srum_path=args.get("srum_path"),
         )
+        return json_response(result)
+
+    elif name == "build_timeline":
+        result = build_timeline(
+            artifacts_dir=args["artifacts_dir"],
+            sources=args.get("sources"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            keyword_filter=args.get("keyword_filter"),
+            limit=args.get("limit", 1000),
+            mft_path=args.get("mft_path"),
+            usn_path=args.get("usn_path"),
+            prefetch_path=args.get("prefetch_path"),
+            amcache_path=args.get("amcache_path"),
+            evtx_path=args.get("evtx_path"),
+        )
+        return json_response(result)
+
+    elif name == "disk_parse_mft":
+        if not MFT_AVAILABLE:
+            return json_response({"error": "mft library not installed. Install with: pip install mft"})
+        result = parse_mft(
+            mft_path=args["mft_path"],
+            file_path_filter=args.get("file_path_filter"),
+            entry_number=args.get("entry_number"),
+            detect_timestomping=args.get("detect_timestomping", True),
+            output_mode=args.get("output_mode", "summary"),
+            allocated_only=args.get("allocated_only", True),
+            files_only=args.get("files_only", False),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            limit=args.get("limit", 100),
+        )
+        return json_response(result)
+
+    elif name == "disk_parse_usn_journal":
+        output_mode = args.get("output_mode", "records")
+
+        if output_mode == "summary":
+            result = get_file_operations_summary(
+                usn_path=args["usn_path"],
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
+            )
+        elif output_mode == "deleted_files":
+            result = find_deleted_files(
+                usn_path=args["usn_path"],
+                extension_filter=args.get("extension_filter"),
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
+                limit=args.get("limit", 100),
+            )
+        else:
+            result = parse_usn_journal(
+                usn_path=args["usn_path"],
+                filename_filter=args.get("filename_filter"),
+                reason_filter=args.get("reason_filter"),
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
+                interesting_only=args.get("interesting_only", False),
+                files_only=args.get("files_only", False),
+                limit=args.get("limit", 100),
+            )
         return json_response(result)
 
     elif name == "remote_collect_artifacts":

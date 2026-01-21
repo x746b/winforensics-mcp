@@ -25,6 +25,7 @@ dependencies = [
     "pefile>=2023.2.7",
     "libscca-python>=20240427",
     "libesedb-python>=20240420",
+    "mft>=0.7.0",
 ]
 
 [project.optional-dependencies]

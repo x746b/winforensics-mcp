@@ -193,12 +193,144 @@ All Phase 1 execution artifacts modules are now implemented:
 
 ---
 
-## Pending Modules
+### 6. MFT Parser (`disk_parse_mft`) ✅
+**Completed:** 2025-01-21
 
-### Phase 2: File System Artifacts
-- [ ] `disk_parse_mft` - MFT parsing with timestomping detection
-- [ ] `disk_parse_usn_journal` - USN Journal parsing
-- [ ] `build_timeline` - Unified timeline builder
+**Files:**
+- `parsers/mft_parser.py` (new)
+- `parsers/__init__.py` (updated)
+- `server.py` (updated)
+- `pyproject.toml` (added `mft>=0.7.0`)
+
+**Features:**
+- Parse $MFT (Master File Table) for file metadata
+- Timestomping detection by comparing $SI and $FN timestamps
+- Extract file paths, sizes, entry IDs, sequence numbers
+- $STANDARD_INFORMATION timestamps (created, modified, accessed, mft_modified)
+- $FILE_NAME timestamps for comparison
+- Filter by file path, entry number, time range
+- Multiple output modes: full, summary, timestomping_only
+- Iterator for streaming large MFT files
+
+**Timestomping Detection Logic:**
+- Flags files where $SI.Created < $FN.Created (impossible in normal operation)
+- Flags files where $SI timestamps are >365 days older than $FN
+- Flags files with zeroed time components (suspicious patterns)
+
+**Tool Parameters:**
+- `mft_path` (required) - Path to $MFT file
+- `file_path_filter` - Filter by file path (case-insensitive)
+- `entry_number` - Get specific MFT entry
+- `detect_timestomping` (default: true)
+- `output_mode` (full/summary/timestomping_only)
+- `allocated_only` (default: true)
+- `files_only` (default: false)
+- `time_range_start/end`
+- `limit` (default: 100)
+
+**Test Status:** Passed
+- Successfully parsed 165MB $MFT file
+- Detected timestomped files including BloodHound
+- Directory detection working (INDEX_PRESENT flag handling)
+
+---
+
+### 7. USN Journal Parser (`disk_parse_usn_journal`) ✅
+**Completed:** 2025-01-21
+
+**Files:**
+- `parsers/usn_parser.py` (new)
+- `parsers/__init__.py` (updated)
+- `server.py` (updated)
+
+**Features:**
+- Custom pure Python parser (no external library)
+- Parse USN_RECORD_V2 and USN_RECORD_V3 formats
+- Handle sparse regions in journal files
+- Extract filename, timestamp, reason flags, file attributes
+- MFT entry and parent entry references
+- Reason flag parsing (FILE_CREATE, FILE_DELETE, RENAME, etc.)
+- Filter by filename, reason types, time range
+- Find deleted files function
+- File operations summary statistics
+- Iterator for streaming large journal files
+
+**USN Reason Flags:**
+- FILE_CREATE, FILE_DELETE, DATA_OVERWRITE, DATA_EXTEND, DATA_TRUNCATION
+- RENAME_OLD_NAME, RENAME_NEW_NAME, SECURITY_CHANGE
+- ENCRYPTION_CHANGE, HARD_LINK_CHANGE, COMPRESSION_CHANGE
+- CLOSE, BASIC_INFO_CHANGE, etc.
+
+**Tool Parameters:**
+- `usn_path` (required) - Path to $J file
+- `filename_filter` - Filter by filename
+- `reason_filter` - Filter by reason types
+- `time_range_start/end`
+- `interesting_only` (default: false)
+- `files_only` (default: false)
+- `output_mode` (records/summary/deleted_files)
+- `extension_filter` - For deleted_files mode
+- `limit` (default: 100)
+
+**Test Status:** Passed
+- Successfully parsed 40MB $J file (376,539 records)
+- Found deleted SharpHound.exe and BloodHound.exe
+- Reason flag parsing working correctly
+
+---
+
+### 8. Timeline Builder (`build_timeline`) ✅
+**Completed:** 2025-01-21
+
+**Files:**
+- `orchestrators/timeline_builder.py` (new)
+- `orchestrators/__init__.py` (updated)
+- `server.py` (updated)
+
+**Features:**
+- Builds comprehensive forensic timeline from multiple sources
+- Auto-detects artifact paths within base directory
+- Correlates events from MFT, USN Journal, Prefetch, Amcache, EVTX
+- Sorts events chronologically (most recent first)
+- Deduplicates similar events using content hashing
+- Per-source event limits for balanced output
+- Keyword filtering across all sources
+- Time range filtering
+- Statistics by source and event type
+
+**Supported Sources:**
+- MFT: file_created, file_modified events
+- USN: file_created, file_deleted, file_renamed, file_modified
+- Prefetch: program_executed events
+- Amcache: program_first_seen events
+- EVTX: Important security/system events (logon, process creation, service install)
+
+**Tool Parameters:**
+- `artifacts_dir` (required) - Base directory with artifacts
+- `sources` - List of sources to include (default: mft, usn, prefetch, amcache)
+- `time_range_start/end`
+- `keyword_filter` - Filter events by keyword
+- `limit` (default: 1000)
+- `mft_path/usn_path/prefetch_path/amcache_path/evtx_path` - Override auto-detection
+
+**Test Status:** Passed
+- All four default sources returning events
+- Keyword filtering working (tested with "kape")
+- Events properly sorted by timestamp
+- Source statistics accurate
+
+---
+
+## Phase 2 Complete ✅
+
+All Phase 2 file system artifacts modules are now implemented:
+- [x] `disk_parse_mft` - MFT parsing with timestomping detection ✅
+- [x] `disk_parse_usn_journal` - USN Journal parsing ✅
+- [x] `build_timeline` - Unified timeline builder ✅
+
+---
+
+## Pending Modules
 
 ### Phase 3: User Activity
 - [ ] `browser_get_history` - Edge/Chrome/Firefox history
@@ -221,6 +353,7 @@ dependencies = [
     "pefile>=2023.2.7",         # v0.2.0 - PE Analysis
     "libscca-python>=20240427", # v0.2.0 - Prefetch parsing
     "libesedb-python>=20240420", # v0.2.0 - SRUM ESE database parsing
+    "mft>=0.7.0",               # v0.2.0 - MFT parsing (Rust-based)
 ]
 ```
 
@@ -228,9 +361,12 @@ dependencies = [
 
 ## Test Samples Location
 `/home/xtk/labs/HTB/_Sherlocks_/_mcp_/samples/C/`
+- MFT: `$MFT` (165MB)
+- USN Journal: `$Extend/$J` (40MB, 376K records)
 - Prefetch: `Windows/prefetch/` (249 files)
 - SRUM: `Windows/System32/sru/SRUDB.dat`
 - Amcache: `Windows/appcompat/Programs/Amcache.hve`
+- EVTX: `Windows/System32/winevt/Logs/`
 - PE files: Various in Sherlocks challenges
 
 ---

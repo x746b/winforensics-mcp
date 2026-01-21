@@ -49,6 +49,23 @@ from .srum_parser import (
     PYESEDB_AVAILABLE,
 )
 
+from .mft_parser import (
+    parse_mft,
+    find_timestomped_files,
+    get_mft_entry,
+    search_mft_by_extension,
+    iter_mft_entries,
+    MFT_AVAILABLE,
+)
+
+from .usn_parser import (
+    parse_usn_journal,
+    search_usn_for_file,
+    get_file_operations_summary,
+    find_deleted_files,
+    iter_usn_records,
+)
+
 __all__ = [
     # EVTX
     "get_evtx_events",
@@ -89,4 +106,17 @@ __all__ = [
     "parse_srum_network_usage",
     "get_srum_summary",
     "PYESEDB_AVAILABLE",
+    # MFT
+    "parse_mft",
+    "find_timestomped_files",
+    "get_mft_entry",
+    "search_mft_by_extension",
+    "iter_mft_entries",
+    "MFT_AVAILABLE",
+    # USN Journal
+    "parse_usn_journal",
+    "search_usn_for_file",
+    "get_file_operations_summary",
+    "find_deleted_files",
+    "iter_usn_records",
 ]
