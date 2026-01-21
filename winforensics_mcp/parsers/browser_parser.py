@@ -106,9 +106,10 @@ def _parse_chromium_history(
     time_range_start: Optional[datetime],
     time_range_end: Optional[datetime],
     limit: int,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Parse Chromium-based browser history (Chrome/Edge)"""
     results = []
+    total_matched = 0
     filter_lower = url_filter.lower() if url_filter else None
 
     # Copy to temp to avoid locking
@@ -150,24 +151,30 @@ def _parse_chromium_history(
             if time_range_end and last_visit_time and last_visit_time > time_range_end:
                 continue
 
-            results.append({
-                'url': url,
-                'title': title,
-                'visit_count': row['visit_count'],
-                'typed_count': row['typed_count'],
-                'last_visit_time': _format_datetime(last_visit_time),
-                'hidden': bool(row['hidden']),
-            })
+            total_matched += 1
 
-            if len(results) >= limit:
-                break
+            # Only add to results if under limit
+            if len(results) < limit:
+                results.append({
+                    'url': url,
+                    'title': title,
+                    'visit_count': row['visit_count'],
+                    'typed_count': row['typed_count'],
+                    'last_visit_time': _format_datetime(last_visit_time),
+                    'hidden': bool(row['hidden']),
+                })
 
         conn.close()
     finally:
         # Cleanup temp files
         shutil.rmtree(temp_path.parent, ignore_errors=True)
 
-    return results
+    return {
+        "entries": results,
+        "total_matched": total_matched,
+        "returned": len(results),
+        "truncated": total_matched > len(results),
+    }
 
 
 def _parse_chromium_downloads(
@@ -176,9 +183,10 @@ def _parse_chromium_downloads(
     time_range_start: Optional[datetime],
     time_range_end: Optional[datetime],
     limit: int,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Parse Chromium-based browser downloads (Chrome/Edge)"""
     results = []
+    total_matched = 0
     filter_lower = url_filter.lower() if url_filter else None
 
     # Download states
@@ -265,27 +273,32 @@ def _parse_chromium_downloads(
             if time_range_end and start_time and start_time > time_range_end:
                 continue
 
-            results.append({
-                'target_path': target_path,
-                'url': tab_url,
-                'referrer': referrer if referrer else None,
-                'start_time': _format_datetime(start_time),
-                'end_time': _format_datetime(end_time),
-                'received_bytes': row['received_bytes'],
-                'total_bytes': row['total_bytes'],
-                'state': STATE_MAP.get(row['state'], f"unknown_{row['state']}"),
-                'danger_type': DANGER_MAP.get(row['danger_type'], f"unknown_{row['danger_type']}"),
-                'mime_type': row['mime_type'],
-            })
+            total_matched += 1
 
-            if len(results) >= limit:
-                break
+            if len(results) < limit:
+                results.append({
+                    'target_path': target_path,
+                    'url': tab_url,
+                    'referrer': referrer if referrer else None,
+                    'start_time': _format_datetime(start_time),
+                    'end_time': _format_datetime(end_time),
+                    'received_bytes': row['received_bytes'],
+                    'total_bytes': row['total_bytes'],
+                    'state': STATE_MAP.get(row['state'], f"unknown_{row['state']}"),
+                    'danger_type': DANGER_MAP.get(row['danger_type'], f"unknown_{row['danger_type']}"),
+                    'mime_type': row['mime_type'],
+                })
 
         conn.close()
     finally:
         shutil.rmtree(temp_path.parent, ignore_errors=True)
 
-    return results
+    return {
+        "entries": results,
+        "total_matched": total_matched,
+        "returned": len(results),
+        "truncated": total_matched > len(results),
+    }
 
 
 def _parse_firefox_history(
@@ -294,9 +307,10 @@ def _parse_firefox_history(
     time_range_start: Optional[datetime],
     time_range_end: Optional[datetime],
     limit: int,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Parse Firefox browser history"""
     results = []
+    total_matched = 0
     filter_lower = url_filter.lower() if url_filter else None
 
     temp_path = _copy_to_temp(db_path)
@@ -337,23 +351,28 @@ def _parse_firefox_history(
             if time_range_end and last_visit_time and last_visit_time > time_range_end:
                 continue
 
-            results.append({
-                'url': url,
-                'title': title,
-                'visit_count': row['visit_count'],
-                'typed_count': row['typed'],
-                'last_visit_time': _format_datetime(last_visit_time),
-                'hidden': bool(row['hidden']),
-            })
+            total_matched += 1
 
-            if len(results) >= limit:
-                break
+            if len(results) < limit:
+                results.append({
+                    'url': url,
+                    'title': title,
+                    'visit_count': row['visit_count'],
+                    'typed_count': row['typed'],
+                    'last_visit_time': _format_datetime(last_visit_time),
+                    'hidden': bool(row['hidden']),
+                })
 
         conn.close()
     finally:
         shutil.rmtree(temp_path.parent, ignore_errors=True)
 
-    return results
+    return {
+        "entries": results,
+        "total_matched": total_matched,
+        "returned": len(results),
+        "truncated": total_matched > len(results),
+    }
 
 
 def _parse_firefox_downloads(
@@ -362,9 +381,10 @@ def _parse_firefox_downloads(
     time_range_start: Optional[datetime],
     time_range_end: Optional[datetime],
     limit: int,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Parse Firefox downloads from moz_annos table"""
     results = []
+    total_matched = 0
     filter_lower = url_filter.lower() if url_filter else None
 
     temp_path = _copy_to_temp(db_path)
@@ -405,18 +425,19 @@ def _parse_firefox_downloads(
                 if time_range_end and download_time and download_time > time_range_end:
                     continue
 
+                total_matched += 1
+
                 # Clean up file:// prefix
                 if target_path and target_path.startswith('file:///'):
                     target_path = target_path[8:]  # Remove file:///
 
-                results.append({
-                    'target_path': target_path,
-                    'url': url,
-                    'start_time': _format_datetime(download_time),
-                })
+                if len(results) < limit:
+                    results.append({
+                        'target_path': target_path,
+                        'url': url,
+                        'start_time': _format_datetime(download_time),
+                    })
 
-                if len(results) >= limit:
-                    break
         except sqlite3.OperationalError:
             # moz_annos table might not exist in newer Firefox versions
             pass
@@ -425,7 +446,12 @@ def _parse_firefox_downloads(
     finally:
         shutil.rmtree(temp_path.parent, ignore_errors=True)
 
-    return results
+    return {
+        "entries": results,
+        "total_matched": total_matched,
+        "returned": len(results),
+        "truncated": total_matched > len(results),
+    }
 
 
 def parse_browser_history(
@@ -491,31 +517,48 @@ def parse_browser_history(
         "history": [],
         "downloads": [] if include_downloads else None,
         "history_count": 0,
+        "history_total": 0,
+        "history_truncated": False,
         "downloads_count": 0 if include_downloads else None,
+        "downloads_total": 0 if include_downloads else None,
+        "downloads_truncated": False if include_downloads else None,
     }
 
     # Parse based on browser type
     if browser in ('chrome', 'edge'):
-        result['history'] = _parse_chromium_history(
+        history_result = _parse_chromium_history(
             history_path, url_filter, start_dt, end_dt, limit
         )
+        result['history'] = history_result['entries']
+        result['history_total'] = history_result['total_matched']
+        result['history_truncated'] = history_result['truncated']
+
         if include_downloads:
-            result['downloads'] = _parse_chromium_downloads(
+            downloads_result = _parse_chromium_downloads(
                 history_path, url_filter, start_dt, end_dt, limit
             )
+            result['downloads'] = downloads_result['entries']
+            result['downloads_total'] = downloads_result['total_matched']
+            result['downloads_truncated'] = downloads_result['truncated']
     elif browser == 'firefox':
-        result['history'] = _parse_firefox_history(
+        history_result = _parse_firefox_history(
             history_path, url_filter, start_dt, end_dt, limit
         )
+        result['history'] = history_result['entries']
+        result['history_total'] = history_result['total_matched']
+        result['history_truncated'] = history_result['truncated']
         if include_downloads:
-            result['downloads'] = _parse_firefox_downloads(
+            downloads_result = _parse_firefox_downloads(
                 history_path, url_filter, start_dt, end_dt, limit
             )
+            result['downloads'] = downloads_result['entries']
+            result['downloads_total'] = downloads_result['total_matched']
+            result['downloads_truncated'] = downloads_result['truncated']
     else:
         raise ValueError(f"Unknown or unsupported browser type: {browser}")
 
     result['history_count'] = len(result['history'])
-    if include_downloads:
+    if include_downloads and result['downloads'] is not None:
         result['downloads_count'] = len(result['downloads'])
 
     return result
@@ -582,17 +625,23 @@ def get_browser_downloads(
     )
 
     downloads = result.get('downloads', [])
+    total_matched = result.get('downloads_total', len(downloads))
 
     if dangerous_only:
-        downloads = [
+        # Filter for dangerous downloads
+        dangerous_downloads = [
             d for d in downloads
             if d.get('danger_type') and d['danger_type'] != 'not_dangerous'
-        ][:limit]
+        ]
+        total_matched = len(dangerous_downloads)
+        downloads = dangerous_downloads[:limit]
 
     return {
         "path": result['path'],
         "browser": result['browser'],
         "downloads": downloads,
         "downloads_count": len(downloads),
+        "downloads_total": total_matched,
+        "truncated": total_matched > len(downloads),
         "filter": "dangerous_only" if dangerous_only else None,
     }
