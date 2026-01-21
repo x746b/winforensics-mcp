@@ -731,6 +731,26 @@ mount -o ro /dev/sdb1 /mnt/evidence
 
 ---
 
+## Configuration
+
+### Adjusting Response Limits
+
+To prevent large responses from overwhelming LLM context, edit `winforensics_mcp/config.py`:
+
+```python
+MAX_EVTX_RESULTS = 50       # Event log search results
+MAX_REGISTRY_RESULTS = 50   # Registry search results
+MAX_PREFETCH_RESULTS = 20   # Prefetch entries
+MAX_AMCACHE_RESULTS = 30    # Amcache entries
+MAX_TIMELINE_RESULTS = 50   # Timeline events
+MAX_MFT_RESULTS = 30        # MFT entries
+MAX_USN_RESULTS = 30        # USN Journal records
+```
+
+Restart Claude Code after changes to apply new limits.
+
+---
+
 ## Troubleshooting
 
 ### "Module not found" errors
