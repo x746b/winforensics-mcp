@@ -1,6 +1,6 @@
-# Windows Forensics MCP Server
+![](icon.png)
 
-**Author:** xtk
+# Windows Forensics MCP Server
 
 A comprehensive **Model Context Protocol (MCP)** server for Windows digital forensics, enabling AI-assisted analysis of Windows artifacts directly from Claude CLI or any MCP-compatible client.
 
@@ -583,3 +583,6 @@ MIT License
 - [libscca-python](https://github.com/libyal/libscca) - Prefetch parsing
 - [libesedb-python](https://github.com/libyal/libesedb) - ESE database (SRUM) parsing
 - [MCP](https://github.com/anthropics/mcp) - Model Context Protocol
+
+__xtk__
+
