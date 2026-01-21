@@ -1,4 +1,6 @@
-![](icon.png)
+<p align="center">
+  <img src="icon.png" width="150" alt="WinForensics MCP">
+</p>
 
 # Windows Forensics MCP Server
 
@@ -18,6 +20,16 @@ A comprehensive **Model Context Protocol (MCP)** server for Windows digital fore
 - **Amcache Analysis** - SHA1 hashes and first-seen timestamps from Amcache.hve
 - **SRUM Analysis** - Application resource usage, CPU time, and network activity from SRUDB.dat
 - **Execution Investigation** - Orchestrator that correlates Prefetch, Amcache, and SRUM to answer "Was this binary executed?"
+
+### File System Artifacts (v0.2.0)
+- **MFT Parsing** - Master File Table analysis with timestomping detection
+- **USN Journal** - Change journal parsing for file operations and deleted file recovery
+- **Timeline Builder** - Unified timeline from MFT, USN, Prefetch, Amcache, and EVTX
+
+### User Activity (v0.2.0)
+- **Browser History** - Edge, Chrome, and Firefox history/downloads parsing
+- **LNK Files** - Windows shortcut analysis for recently accessed files
+- **ShellBags** - Folder navigation history from UsrClass.dat with suspicious path detection
 
 ---
 
@@ -142,6 +154,22 @@ gemini mcp add winforensics-mcp "uv" --scope user -- run --directory /opt/winfor
 | `disk_parse_amcache` | Parse Amcache.hve for SHA1 hashes and timestamps |
 | `disk_parse_srum` | Parse SRUDB.dat for app resource and network usage |
 | `investigate_execution` | Correlate all execution artifacts for comprehensive analysis |
+
+### File System Tools (v0.2.0)
+
+| Tool | Description |
+|------|-------------|
+| `disk_parse_mft` | Parse $MFT for file metadata and timestomping detection |
+| `disk_parse_usn_journal` | Parse $J for file operations and deleted files |
+| `build_timeline` | Build unified timeline from multiple artifact sources |
+
+### User Activity Tools (v0.2.0)
+
+| Tool | Description |
+|------|-------------|
+| `browser_get_history` | Parse Edge/Chrome/Firefox history and downloads |
+| `user_parse_lnk_files` | Parse Windows shortcuts for target paths and timestamps |
+| `user_parse_shellbags` | Parse ShellBags for folder navigation history |
 
 ### Reference Tools
 
@@ -317,6 +345,188 @@ Show me network activity for suspicious applications from SRUM
       "bytes_sent": 1048576,
       "bytes_received": 2097152,
       "timestamp": "2025-01-20T19:15:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### File System Analysis (v0.2.0)
+
+#### Detect Timestomped Files
+
+**Request:**
+```
+Find timestomped files in the MFT at /mnt/evidence/$MFT
+```
+
+**Output:**
+```json
+{
+  "total_timestomped": 3,
+  "timestomped_files": [
+    {
+      "path": "Users\\Alpha\\Downloads\\mimikatz.exe",
+      "si_created": "2019-01-15T10:00:00Z",
+      "fn_created": "2025-01-20T14:30:00Z",
+      "detection_reason": "$SI created before $FN (impossible)"
+    },
+    {
+      "path": "Windows\\Temp\\backdoor.dll",
+      "si_created": "2020-06-01T00:00:00Z",
+      "fn_created": "2025-01-21T08:15:00Z",
+      "detection_reason": "$SI timestamp >1 year older than $FN"
+    }
+  ]
+}
+```
+
+#### Find Deleted Files from USN Journal
+
+**Request:**
+```
+Find deleted executable files from the USN journal
+```
+
+**Output:**
+```json
+{
+  "output_mode": "deleted_files",
+  "extension_filter": ".exe",
+  "deleted_files": [
+    {
+      "filename": "SharpHound.exe",
+      "timestamp": "2025-01-20T15:45:00Z",
+      "mft_entry": 123456,
+      "parent_entry": 78901
+    },
+    {
+      "filename": "mimikatz.exe",
+      "timestamp": "2025-01-20T16:00:00Z",
+      "mft_entry": 234567
+    }
+  ]
+}
+```
+
+#### Build Forensic Timeline
+
+**Request:**
+```
+Build a timeline from all artifacts in /mnt/evidence for the keyword "mimikatz"
+```
+
+**Output:**
+```json
+{
+  "keyword_filter": "mimikatz",
+  "total_events": 8,
+  "events": [
+    {"time": "2025-01-20T14:30:00Z", "source": "MFT", "type": "file_created", "details": "mimikatz.exe"},
+    {"time": "2025-01-20T14:31:00Z", "source": "Prefetch", "type": "program_executed", "details": "MIMIKATZ.EXE-ABC123.pf"},
+    {"time": "2025-01-20T14:32:00Z", "source": "Amcache", "type": "program_first_seen", "details": "mimikatz.exe"},
+    {"time": "2025-01-20T16:00:00Z", "source": "USN", "type": "file_deleted", "details": "mimikatz.exe"}
+  ]
+}
+```
+
+---
+
+### User Activity Analysis (v0.2.0)
+
+#### Parse Browser History
+
+**Request:**
+```
+Get browser history from the Edge profile, filter for "mega.nz"
+```
+
+**Output:**
+```json
+{
+  "browser": "edge",
+  "url_filter": "mega.nz",
+  "history_count": 2,
+  "history": [
+    {
+      "url": "https://mega.nz/file/abc123",
+      "title": "MEGA - Download",
+      "visit_time": "2025-01-20T10:15:00Z",
+      "visit_count": 1
+    }
+  ],
+  "downloads": [
+    {
+      "url": "https://mega.nz/file/abc123",
+      "target_path": "C:\\Users\\Alpha\\Downloads\\DC-Scan.ps1",
+      "start_time": "2025-01-20T10:15:30Z",
+      "total_bytes": 15420,
+      "dangerous_type": "DANGEROUS_FILE"
+    }
+  ]
+}
+```
+
+#### Analyze ShellBags for Suspicious Folder Access
+
+**Request:**
+```
+Check ShellBags for suspicious folder access by user Alpha
+```
+
+**Output:**
+```json
+{
+  "total_suspicious": 4,
+  "suspicious_folders": [
+    {
+      "path": "My Computer\\C:\\Windows\\Temp",
+      "last_viewed": "2025-01-20T14:30:00Z",
+      "reason": "Suspicious path pattern: \\temp"
+    },
+    {
+      "path": "My Computer\\Downloads\\mimikatz_trunk",
+      "last_viewed": "2025-01-20T14:25:00Z",
+      "reason": "Suspicious path pattern: mimikatz"
+    },
+    {
+      "path": "My Computer\\C:\\Users\\Alpha\\AppData\\Roaming",
+      "last_viewed": "2025-01-20T14:20:00Z",
+      "reason": "Suspicious path pattern: appdata\\roaming"
+    }
+  ]
+}
+```
+
+#### Parse LNK Files for Recent File Access
+
+**Request:**
+```
+Show recently accessed files from user Alpha's Recent folder
+```
+
+**Output:**
+```json
+{
+  "user_profile": "/mnt/evidence/Users/Alpha",
+  "recent_folder": "/mnt/evidence/Users/Alpha/AppData/Roaming/Microsoft/Windows/Recent",
+  "count": 5,
+  "recent_files": [
+    {
+      "filename": "ntds.dit.lnk",
+      "target_path": "C:\\Windows\\NTDS\\ntds.dit",
+      "timestamps": {
+        "creation_time": "2025-01-20T14:00:00Z",
+        "modification_time": "2025-01-20T14:00:00Z"
+      }
+    },
+    {
+      "filename": "PowerView.ps1.lnk",
+      "target_path": "C:\\Users\\Alpha\\Downloads\\PowerView.ps1",
+      "timestamps": {
+        "creation_time": "2025-01-20T13:45:00Z"
+      }
     }
   ]
 }
@@ -529,7 +739,7 @@ mount -o ro /dev/sdb1 /mnt/evidence
 
 ```bash
 source /path/to/winforensics-mcp/.venv/bin/activate
-pip list | grep -E "evtx|registry|mcp|pefile|pyscca|pyesedb"
+pip list | grep -E "evtx|registry|mcp|pefile|scca|esedb|mft|pylnk"
 ```
 
 ### "Permission denied" on registry hives
@@ -542,7 +752,7 @@ Registry hives may be locked. Either:
 
 Ensure dependencies are installed:
 ```bash
-uv pip install pefile libscca-python libesedb-python
+uv pip install pefile libscca-python libesedb-python mft pylnk3
 ```
 
 ### Remove MCP Server
@@ -582,6 +792,8 @@ MIT License
 - [pefile](https://github.com/erocarrera/pefile) - PE file analysis
 - [libscca-python](https://github.com/libyal/libscca) - Prefetch parsing
 - [libesedb-python](https://github.com/libyal/libesedb) - ESE database (SRUM) parsing
+- [mft](https://github.com/omerbenamram/mft) - MFT parsing (Rust-based)
+- [pylnk3](https://github.com/strayge/pylnk) - LNK file parsing
 - [MCP](https://github.com/anthropics/mcp) - Model Context Protocol
 
 __xtk__
