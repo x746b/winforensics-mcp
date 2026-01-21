@@ -6,10 +6,18 @@ A comprehensive **Model Context Protocol (MCP)** server for Windows digital fore
 
 ## Features
 
+### Logs & Configuration (v0.1.0)
 - **EVTX Parsing** - Windows Event Log analysis with filtering, search, and pre-built security queries
 - **Registry Analysis** - Parse SAM, SYSTEM, SOFTWARE, SECURITY, NTUSER.DAT hives
 - **Remote Collection** - Collect artifacts via WinRM with password or pass-the-hash authentication
 - **Forensic Reference** - Built-in knowledge of important Event IDs and registry keys
+
+### Execution Artifacts (v0.2.0)
+- **PE Analysis** - Static analysis of Windows executables with hash calculation, import/export extraction, packer detection, and suspicious API identification
+- **Prefetch Parsing** - Execution evidence with run counts, timestamps, and loaded files
+- **Amcache Analysis** - SHA1 hashes and first-seen timestamps from Amcache.hve
+- **SRUM Analysis** - Application resource usage, CPU time, and network activity from SRUDB.dat
+- **Execution Investigation** - Orchestrator that correlates Prefetch, Amcache, and SRUM to answer "Was this binary executed?"
 
 ---
 
@@ -30,7 +38,7 @@ python3 --version
 
 ```bash
 # Clone the repository
-https://github.com/x746b/winforensics-mcp.git
+git clone https://github.com/x746b/winforensics-mcp.git
 cd winforensics-mcp
 
 # Create virtual environment and install
@@ -125,6 +133,16 @@ gemini mcp add winforensics-mcp "uv" --scope user -- run --directory /opt/winfor
 | `registry_get_system_info` | Get OS version, hostname, timezone |
 | `registry_get_network` | Get network configuration |
 
+### Execution Artifact Tools (v0.2.0)
+
+| Tool | Description |
+|------|-------------|
+| `file_analyze_pe` | Static PE analysis - hashes, imports, exports, packer detection |
+| `disk_parse_prefetch` | Parse Prefetch files for execution evidence |
+| `disk_parse_amcache` | Parse Amcache.hve for SHA1 hashes and timestamps |
+| `disk_parse_srum` | Parse SRUDB.dat for app resource and network usage |
+| `investigate_execution` | Correlate all execution artifacts for comprehensive analysis |
+
 ### Reference Tools
 
 | Tool | Description |
@@ -141,9 +159,174 @@ gemini mcp add winforensics-mcp "uv" --scope user -- run --directory /opt/winfor
 
 ---
 
-## Usage Examples with Sample Output
+## Usage Examples
 
-### 1. List Available Event Logs
+### Execution Analysis (v0.2.0)
+
+#### Investigate Binary Execution
+
+**Request:**
+```
+Was mimikatz.exe ever executed? Check the artifacts in /mnt/evidence
+```
+
+**Output:**
+```json
+{
+  "target": "mimikatz.exe",
+  "execution_confirmed": true,
+  "confidence": "HIGH",
+  "evidence": [
+    {
+      "source": "Prefetch",
+      "found": true,
+      "finding": "Executed 3 times, last at 2024-03-15T14:23:45Z",
+      "run_count": 3
+    },
+    {
+      "source": "Amcache",
+      "found": true,
+      "finding": "SHA1: abc123..., First seen: 2024-03-14T09:00:00Z"
+    },
+    {
+      "source": "SRUM",
+      "found": true,
+      "finding": "Network activity: 15.2 MB sent; Foreground time: 47 seconds"
+    }
+  ],
+  "timeline": [
+    {"time": "2024-03-14T09:00:00Z", "event": "First recorded in Amcache"},
+    {"time": "2024-03-15T14:23:45Z", "event": "Last execution (Prefetch)"}
+  ],
+  "summary": "Execution of 'mimikatz.exe' confirmed (HIGH confidence)"
+}
+```
+
+#### Analyze a Suspicious PE File
+
+**Request:**
+```
+Analyze the PE file at /evidence/malware.exe
+```
+
+**Output:**
+```json
+{
+  "filename": "malware.exe",
+  "hashes": {
+    "md5": "abc123...",
+    "sha1": "def456...",
+    "sha256": "ghi789...",
+    "imphash": "jkl012..."
+  },
+  "pe_type": "PE32+ executable (GUI) x86-64",
+  "compile_time": "2024-03-10T08:15:22Z",
+  "sections": [
+    {"name": ".text", "entropy": 6.2, "suspicious": false},
+    {"name": "UPX0", "entropy": 0.0, "suspicious": true}
+  ],
+  "suspicious_indicators": [
+    "UPX packed",
+    "Process injection APIs detected (VirtualAllocEx, WriteProcessMemory)",
+    "No version info"
+  ],
+  "imports_summary": {
+    "kernel32.dll": ["VirtualAlloc", "CreateThread", "WriteProcessMemory"],
+    "ntdll.dll": ["NtUnmapViewOfSection"]
+  }
+}
+```
+
+#### Parse Prefetch Files
+
+**Request:**
+```
+Show me recent PowerShell executions from the Prefetch directory
+```
+
+**Output:**
+```json
+{
+  "searched_executable": "powershell",
+  "found": true,
+  "total_run_count": 51,
+  "execution_evidence": [
+    {
+      "executable": "POWERSHELL.EXE",
+      "prefetch_hash": "913B4D98",
+      "run_count": 51,
+      "last_run_times": [
+        "2025-01-21T01:59:35Z",
+        "2025-01-20T18:30:12Z",
+        "2025-01-20T15:45:00Z"
+      ]
+    }
+  ]
+}
+```
+
+#### Check Amcache for Suspicious Tools
+
+**Request:**
+```
+Search Amcache for any hacking tools
+```
+
+**Output:**
+```json
+{
+  "path": "/mnt/evidence/Windows/AppCompat/Programs/Amcache.hve",
+  "entries": [
+    {
+      "name": "BloodHound.exe",
+      "sha1": "204bc44c651e17f65c95314e0b6dfee586b72089",
+      "path": "c:\\users\\admin\\downloads\\bloodhound.exe",
+      "key_timestamp": "2024-12-21T02:25:24Z",
+      "suspicious_reason": "Unusual execution path"
+    },
+    {
+      "name": "mimikatz.exe",
+      "sha1": "abc123def456...",
+      "path": "c:\\temp\\mimikatz.exe",
+      "suspicious_reason": "Unusual execution path"
+    }
+  ]
+}
+```
+
+#### Analyze Application Resource Usage (SRUM)
+
+**Request:**
+```
+Show me network activity for suspicious applications from SRUM
+```
+
+**Output:**
+```json
+{
+  "table": "Network Data Usage",
+  "entries": [
+    {
+      "executable": "powershell.exe",
+      "bytes_sent": 15728640,
+      "bytes_received": 52428800,
+      "timestamp": "2025-01-20T18:30:00Z"
+    },
+    {
+      "executable": "nc.exe",
+      "bytes_sent": 1048576,
+      "bytes_received": 2097152,
+      "timestamp": "2025-01-20T19:15:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### Event Log Analysis
+
+#### List Available Event Logs
 
 **Request:**
 ```
@@ -168,33 +351,7 @@ List all EVTX files in /mnt/evidence/Windows/System32/winevt/Logs
 ]
 ```
 
-### 2. Get Event Log Statistics
-
-**Request:**
-```
-Show me stats for Security.evtx
-```
-
-**Output:**
-```json
-{
-  "file": "Security.evtx",
-  "total_events": 15847,
-  "time_range": {
-    "earliest": "2025-01-15T08:00:00Z",
-    "latest": "2025-03-17T19:51:24Z"
-  },
-  "top_event_ids": {
-    "4624": 3521,
-    "4625": 847,
-    "4634": 3498,
-    "4672": 1205,
-    "4688": 4892
-  }
-}
-```
-
-### 3. Search for Failed Logon Attempts
+#### Search for Failed Logon Attempts
 
 **Request:**
 ```
@@ -213,66 +370,18 @@ Find all failed logon events in Security.evtx
       "TargetUserName": "svc_backup",
       "TargetDomainName": "CORP",
       "LogonType": 3,
-      "Status": "0xC000006D",
-      "SubStatus": "0xC000006A",
-      "WorkstationName": "WKS001",
       "IpAddress": "192.168.1.50",
       "ProcessName": "C:\\Windows\\Temp\\RunasCs.exe"
-    },
-    {
-      "EventID": 4625,
-      "TimeCreated": "2025-03-17T19:46:14Z",
-      "TargetUserName": "admin_ops",
-      "TargetDomainName": "CORP",
-      "LogonType": 3,
-      "Status": "0xC000006D",
-      "ProcessName": "C:\\Windows\\Temp\\RunasCs.exe"
     }
   ]
 }
 ```
 
-### 4. Analyze User Accounts from SAM
+---
 
-**Request:**
-```
-List all user accounts from the SAM hive
-```
+### Registry Analysis
 
-**Output:**
-```json
-{
-  "users": [
-    {
-      "username": "Administrator",
-      "rid": 500,
-      "created": "2024-08-21T08:27:42Z",
-      "last_login": "2025-03-17T19:44:14Z",
-      "login_count": 42,
-      "password_last_set": "2025-03-17T19:51:23Z",
-      "account_flags": ["Password Never Expires"]
-    },
-    {
-      "username": "Guest",
-      "rid": 501,
-      "created": "2024-08-21T08:27:42Z",
-      "last_login": null,
-      "login_count": 0,
-      "account_flags": ["Account Disabled"]
-    },
-    {
-      "username": "svc_deploy",
-      "rid": 1002,
-      "created": "2025-03-17T19:47:02Z",
-      "last_login": "2025-03-17T19:51:24Z",
-      "login_count": 1,
-      "account_flags": []
-    }
-  ]
-}
-```
-
-### 5. Check Persistence Mechanisms
+#### Check Persistence Mechanisms
 
 **Request:**
 ```
@@ -288,148 +397,93 @@ Check for persistence in the SOFTWARE and SYSTEM registry hives
       "name": "SecurityHealth",
       "value": "%ProgramFiles%\\Windows Defender\\MSASCuiL.exe",
       "suspicious": false
-    },
-    {
-      "key": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
-      "name": "VMware User Process",
-      "value": "\"C:\\Program Files\\VMware\\VMware Tools\\vmtoolsd.exe\" -n vmusr",
-      "suspicious": false
     }
   ],
   "services": [
     {
-      "name": "WinDefend",
-      "display_name": "Windows Defender Antivirus Service",
-      "image_path": "\"C:\\ProgramData\\Microsoft\\Windows Defender\\platform\\4.18.2302.7-0\\MsMpEng.exe\"",
+      "name": "malicious_svc",
+      "image_path": "C:\\Windows\\Temp\\backdoor.exe",
       "start_type": 2,
-      "suspicious": false
-    }
-  ],
-  "suspicious_count": 0
-}
-```
-
-### 6. Get System Information
-
-**Request:**
-```
-What Windows version and computer name from the registry?
-```
-
-**Output:**
-```json
-{
-  "computer_name": "WKS001",
-  "domain": "corp.local",
-  "os": {
-    "product_name": "Windows 10 Pro",
-    "build": "19041",
-    "version": "2004",
-    "install_date": "2024-08-21T08:25:00Z"
-  },
-  "timezone": "Pacific Standard Time",
-  "last_shutdown": "2025-03-17T06:00:00Z"
-}
-```
-
-### 7. Get Network Configuration
-
-**Request:**
-```
-Show network configuration from SYSTEM hive
-```
-
-**Output:**
-```json
-{
-  "interfaces": [
-    {
-      "name": "Ethernet0",
-      "dhcp_enabled": false,
-      "ip_address": "192.168.1.50",
-      "subnet_mask": "255.255.255.0",
-      "default_gateway": "192.168.1.1",
-      "dns_servers": ["192.168.1.10", "192.168.1.11"]
+      "suspicious": true
     }
   ]
 }
 ```
 
-### 8. Search Registry for Suspicious Entries
+#### Get User Accounts from SAM
 
 **Request:**
 ```
-Search the SOFTWARE hive for 'mimikatz'
+List all user accounts from the SAM hive
 ```
 
 **Output:**
 ```json
 {
-  "pattern": "mimikatz",
-  "matches": [],
-  "count": 0
-}
-```
-
-### 9. Get USB Device History
-
-**Request:**
-```
-Show USB device history from SYSTEM hive
-```
-
-**Output:**
-```json
-{
-  "devices": [
+  "users": [
     {
-      "vendor": "SanDisk",
-      "product": "Ultra USB 3.0",
-      "serial": "4C530001234567890",
-      "first_connected": "2025-02-10T14:30:00Z",
-      "last_connected": "2025-03-15T09:00:00Z"
+      "username": "Administrator",
+      "rid": 500,
+      "last_login": "2025-03-17T19:44:14Z",
+      "login_count": 42,
+      "account_flags": ["Password Never Expires"]
+    },
+    {
+      "username": "svc_deploy",
+      "rid": 1002,
+      "created": "2025-03-17T19:47:02Z",
+      "login_count": 1
     }
   ]
 }
 ```
 
-### 10. Remote Artifact Collection
+---
 
-**Request with Password:**
-```
-Collect forensic artifacts from 192.168.1.100 with username 'admin' and save to /cases/case001
+## Typical Investigation Workflow
+
+### 1. Collect or Mount Evidence
+
+```bash
+# Mount Windows image
+mount -o ro /dev/sdb1 /mnt/evidence
+
+# Or collect from remote system
+"Collect artifacts from 192.168.1.50 user admin to /cases/incident001"
 ```
 
-**Request with Pass-the-Hash:**
+### 2. Quick Triage with Execution Investigation
+
 ```
-Collect artifacts from 192.168.1.100 as administrator using hash aad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0
+"Was mimikatz.exe or powershell.exe executed? Check /mnt/evidence"
 ```
 
-**Output:**
-```json
-[
-  {
-    "artifact": "Security.evtx",
-    "success": true,
-    "local_path": "/cases/case001/evtx/Security.evtx",
-    "size_bytes": 69206016,
-    "error": null
-  },
-  {
-    "artifact": "SAM",
-    "success": true,
-    "local_path": "/cases/case001/registry/SAM",
-    "size_bytes": 65536,
-    "error": null
-  },
-  {
-    "artifact": "SYSTEM",
-    "success": true,
-    "local_path": "/cases/case001/registry/SYSTEM",
-    "size_bytes": 17825792,
-    "error": null
-  }
-]
+### 3. Deep Dive on Suspicious Binaries
+
+```
+"Analyze the PE file at /mnt/evidence/Windows/Temp/suspicious.exe"
+"Search Amcache for files in the Temp folder"
+```
+
+### 4. Timeline Analysis
+
+```
+"Show me all Prefetch entries sorted by last run time"
+"Find process creation events between 2025-01-15T10:00:00Z and 2025-01-15T12:00:00Z"
+```
+
+### 5. Persistence Check
+
+```
+"Check persistence mechanisms in the SOFTWARE and SYSTEM hives"
+"Search registry for references to suspicious paths"
+```
+
+### 6. Lateral Movement Detection
+
+```
+"Find all logon events with LogonType 3 or 10"
+"Show me service installations from the System event log"
 ```
 
 ---
@@ -469,61 +523,13 @@ Collect artifacts from 192.168.1.100 as administrator using hash aad3b435b51404e
 
 ---
 
-## Typical Investigation Workflow
-
-### 1. Mount or Collect Evidence
-
-```bash
-# Mount Windows image
-mount -o ro /dev/sdb1 /mnt/evidence
-
-# Or collect from remote system
-"Collect artifacts from 192.168.1.50 user admin to /cases/incident001"
-```
-
-### 2. Discover Available Logs
-
-```
-"List all EVTX files in /mnt/evidence/Windows/System32/winevt/Logs"
-```
-
-### 3. Get Overview
-
-```
-"Show stats for Security.evtx - what events are most common?"
-```
-
-### 4. Hunt for Suspicious Activity
-
-```
-"Find all failed logon attempts in Security.evtx"
-"Search for process creation events with powershell or cmd"
-"Look for service installations in System.evtx"
-```
-
-### 5. Analyze Registry
-
-```
-"Check persistence mechanisms in the SOFTWARE and SYSTEM hives"
-"Get user account details from SAM"
-"Search registry for references to suspicious IP 10.10.10.10"
-```
-
-### 6. Correlate Findings
-
-```
-"Show me events between 2025-01-15T10:00:00Z and 2025-01-15T12:00:00Z"
-```
-
----
-
 ## Troubleshooting
 
 ### "Module not found" errors
 
 ```bash
 source /path/to/winforensics-mcp/.venv/bin/activate
-pip list | grep -E "evtx|registry|mcp"
+pip list | grep -E "evtx|registry|mcp|pefile|pyscca|pyesedb"
 ```
 
 ### "Permission denied" on registry hives
@@ -532,14 +538,11 @@ Registry hives may be locked. Either:
 - Use offline/copied hives from a mounted image
 - Use VSS (Volume Shadow Copy) collection via WinRM
 
-### WinRM connection issues
+### Missing v0.2.0 tools
 
+Ensure dependencies are installed:
 ```bash
-# Test with password
-python -c "import winrm; s=winrm.Session('http://HOST:5985/wsman', auth=('user','pass')); print(s.run_cmd('hostname'))"
-
-# Test with pass-the-hash
-python -c "import winrm; s=winrm.Session('http://HOST:5985/wsman', auth=('user','00000000000000000000000000000000:NTHASH'), transport='ntlm'); print(s.run_cmd('hostname'))"
+uv pip install pefile libscca-python libesedb-python
 ```
 
 ### Remove MCP Server
@@ -576,4 +579,7 @@ MIT License
 
 - [python-evtx](https://github.com/williballenthin/python-evtx) - EVTX parsing
 - [python-registry](https://github.com/williballenthin/python-registry) - Registry parsing
+- [pefile](https://github.com/erocarrera/pefile) - PE file analysis
+- [libscca-python](https://github.com/libyal/libscca) - Prefetch parsing
+- [libesedb-python](https://github.com/libyal/libesedb) - ESE database (SRUM) parsing
 - [MCP](https://github.com/anthropics/mcp) - Model Context Protocol
