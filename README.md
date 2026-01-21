@@ -22,14 +22,14 @@ Traditional Windows forensics often requires:
 
 ## Features
 
-### Core Forensics (v0.1.x)
+### Core Forensics
 | Category | Capabilities |
 |----------|--------------|
 | **EVTX Logs** | Parse Windows Event Logs with filtering, search, and pre-built security queries |
 | **Registry** | Analyze SAM, SYSTEM, SOFTWARE, SECURITY, NTUSER.DAT hives |
 | **Remote Collection** | Collect artifacts via WinRM (password or pass-the-hash) |
 
-### Execution Artifacts (v0.2.x)
+### Execution Artifacts
 | Category | Capabilities |
 |----------|--------------|
 | **PE Analysis** | Static analysis with hashes (MD5/SHA1/SHA256/imphash), imports, exports, packer detection |
@@ -37,14 +37,14 @@ Traditional Windows forensics often requires:
 | **Amcache** | SHA1 hashes and first-seen timestamps from Amcache.hve |
 | **SRUM** | Application resource usage, CPU time, network activity from SRUDB.dat |
 
-### File System Artifacts (v0.2.x)
+### File System Artifacts
 | Category | Capabilities |
 |----------|--------------|
 | **MFT** | Master File Table parsing with timestomping detection |
 | **USN Journal** | Change journal for file operations and deleted file recovery |
 | **Timeline** | Unified timeline from MFT, USN, Prefetch, Amcache, EVTX |
 
-### User Activity (v0.2.x)
+### User Activity
 | Category | Capabilities |
 |----------|--------------|
 | **Browser** | Edge, Chrome, Firefox history and downloads |
@@ -52,7 +52,7 @@ Traditional Windows forensics often requires:
 | **ShellBags** | Folder navigation history with suspicious path detection |
 | **RecentDocs** | Registry-based recent document tracking |
 
-### Orchestrators (v0.2.x)
+### Orchestrators
 | Tool | What It Does |
 |------|--------------|
 | `investigate_execution` | Correlates Prefetch + Amcache + SRUM to answer "Was this binary executed?" |
@@ -60,7 +60,7 @@ Traditional Windows forensics often requires:
 | `hunt_ioc` | Searches for IOC (hash/filename/IP/domain) across ALL artifact sources |
 | `build_timeline` | Builds unified forensic timeline from multiple sources |
 
-### Utilities (v0.2.x)
+### Utilities
 | Tool | What It Does |
 |------|--------------|
 | `ingest_parsed_csv` | Import Eric Zimmerman tool CSV output (MFTECmd, PECmd, AmcacheParser) |
