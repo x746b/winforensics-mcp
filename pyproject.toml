@@ -26,6 +26,7 @@ dependencies = [
     "libscca-python>=20240427",
     "libesedb-python>=20240420",
     "mft>=0.7.0",
+    "pylnk3>=0.4.3",
 ]
 
 [project.optional-dependencies]

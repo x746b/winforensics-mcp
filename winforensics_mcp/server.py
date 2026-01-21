@@ -38,6 +38,14 @@ from .parsers import (
     parse_usn_journal,
     find_deleted_files,
     get_file_operations_summary,
+    parse_browser_history,
+    get_browser_downloads,
+    parse_lnk_file,
+    parse_lnk_directory,
+    get_recent_files,
+    PYLNK_AVAILABLE,
+    parse_shellbags,
+    find_suspicious_folders,
 )
 
 from .orchestrators import investigate_execution, build_timeline
@@ -625,6 +633,131 @@ async def list_tools() -> list[Tool]:
         )
     )
 
+    # Browser history parsing (pure Python, always available)
+    tools.append(
+        Tool(
+            name="browser_get_history",
+            description="Parse browser history and downloads from Edge, Chrome, or Firefox. Answers: What URLs did the user visit? What files were downloaded? Where did downloads originate from?",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "history_path": {
+                        "type": "string",
+                        "description": "Path to browser History SQLite file or profile directory",
+                    },
+                    "browser": {
+                        "type": "string",
+                        "enum": ["auto", "chrome", "edge", "firefox"],
+                        "default": "auto",
+                        "description": "Browser type (auto-detected if not specified)",
+                    },
+                    "include_downloads": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Include download history",
+                    },
+                    "url_filter": {
+                        "type": "string",
+                        "description": "Filter by URL or title (case-insensitive substring)",
+                    },
+                    "dangerous_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Only return downloads flagged as dangerous (Chrome/Edge only)",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter visits after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter visits before this time",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum number of results per category",
+                    },
+                },
+                "required": ["history_path"],
+            },
+        )
+    )
+
+    # LNK file parsing (if pylnk3 available)
+    if PYLNK_AVAILABLE:
+        tools.append(
+            Tool(
+                name="user_parse_lnk_files",
+                description="Parse Windows shortcut (.lnk) files to determine target paths, access times, and volume information. Answers: What files did the user access recently? What were the original file locations?",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to .lnk file, directory containing .lnk files, or user profile path",
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Search recursively in subdirectories",
+                        },
+                        "target_filter": {
+                            "type": "string",
+                            "description": "Filter by target path (case-insensitive substring)",
+                        },
+                        "recent_only": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Only search the user's Recent folder (requires user profile path)",
+                        },
+                        "extension_filter": {
+                            "type": "string",
+                            "description": "Filter recent files by extension (e.g., '.exe', '.ps1')",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum number of results",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            )
+        )
+
+    # ShellBags parsing (uses python-registry, always available)
+    tools.append(
+        Tool(
+            name="user_parse_shellbags",
+            description="Parse ShellBags from UsrClass.dat to reveal folder navigation history. Shows which folders a user browsed in Windows Explorer with timestamps. Answers: Which folders did the user access? When did they browse suspicious paths?",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "usrclass_path": {
+                        "type": "string",
+                        "description": "Path to UsrClass.dat (typically in Users/<user>/AppData/Local/Microsoft/Windows/UsrClass.dat)",
+                    },
+                    "path_filter": {
+                        "type": "string",
+                        "description": "Filter results by path substring (case-insensitive)",
+                    },
+                    "suspicious_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Only return suspicious folder accesses (temp, AppData, network shares, etc.)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum number of results",
+                    },
+                },
+                "required": ["usrclass_path"],
+            },
+        )
+    )
+
     if WINRM_AVAILABLE:
         tools.extend([
             Tool(
@@ -904,6 +1037,74 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 time_range_end=args.get("time_range_end"),
                 interesting_only=args.get("interesting_only", False),
                 files_only=args.get("files_only", False),
+                limit=args.get("limit", 100),
+            )
+        return json_response(result)
+
+    elif name == "browser_get_history":
+        dangerous_only = args.get("dangerous_only", False)
+        if dangerous_only:
+            result = get_browser_downloads(
+                history_path=args["history_path"],
+                browser=args.get("browser", "auto"),
+                dangerous_only=True,
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
+                limit=args.get("limit", 100),
+            )
+        else:
+            result = parse_browser_history(
+                history_path=args["history_path"],
+                browser=args.get("browser", "auto"),
+                include_downloads=args.get("include_downloads", True),
+                url_filter=args.get("url_filter"),
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
+                limit=args.get("limit", 100),
+            )
+        return json_response(result)
+
+    elif name == "user_parse_lnk_files":
+        if not PYLNK_AVAILABLE:
+            return json_response({"error": "pylnk3 library not installed. Install with: pip install pylnk3"})
+
+        path = Path(args["path"])
+        recent_only = args.get("recent_only", False)
+
+        if path.is_file() and path.suffix.lower() == '.lnk':
+            # Parse single LNK file
+            result = parse_lnk_file(path)
+        elif recent_only or (path.is_dir() and (path / "AppData").exists()):
+            # Parse Recent folder from user profile
+            result = get_recent_files(
+                user_profile_path=path,
+                extension_filter=args.get("extension_filter"),
+                limit=args.get("limit", 100),
+            )
+        else:
+            # Parse directory of LNK files
+            result = parse_lnk_directory(
+                directory=path,
+                recursive=args.get("recursive", True),
+                target_filter=args.get("target_filter"),
+                limit=args.get("limit", 100),
+            )
+        return json_response(result)
+
+    elif name == "user_parse_shellbags":
+        usrclass_path = args["usrclass_path"]
+        suspicious_only = args.get("suspicious_only", False)
+
+        if suspicious_only:
+            result = find_suspicious_folders(
+                usrclass_path=usrclass_path,
+                limit=args.get("limit", 100),
+            )
+        else:
+            result = parse_shellbags(
+                usrclass_path=usrclass_path,
+                path_filter=args.get("path_filter"),
+                include_timestamps=True,
                 limit=args.get("limit", 100),
             )
         return json_response(result)

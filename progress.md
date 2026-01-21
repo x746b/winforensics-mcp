@@ -330,12 +330,110 @@ All Phase 2 file system artifacts modules are now implemented:
 
 ---
 
-## Pending Modules
+### 9. Browser History Parser (`browser_get_history`) ✅
+**Completed:** 2025-01-21
 
-### Phase 3: User Activity
-- [ ] `browser_get_history` - Edge/Chrome/Firefox history
-- [ ] `user_parse_shellbags` - Folder navigation history
-- [ ] `user_parse_lnk_files` - LNK shortcut analysis
+**Files:**
+- `parsers/browser_parser.py` (new)
+- `parsers/__init__.py` (updated)
+- `server.py` (updated)
+
+**Features:**
+- Parse Edge, Chrome, and Firefox browser history
+- Auto-detect browser type from database schema
+- Extract URLs, visit times, page titles
+- Extract downloads with dangerous file detection
+- Time range filtering
+- URL keyword filtering
+- Chromium timestamp conversion (microseconds since 1601)
+- Firefox timestamp conversion (microseconds since Unix epoch)
+- Handles locked databases by copying to temp location
+
+**Tool Parameters:**
+- `history_path` (required) - Path to browser History database
+- `browser` - Browser type (auto/chrome/edge/firefox)
+- `include_downloads` - Include download history (default: true)
+- `url_filter` - Filter by URL keyword
+- `time_range_start/end` - ISO format time range
+- `limit` (default: 100)
+
+**Test Status:** Passed
+- Edge History: 8 entries, 1 download (DC-Scan.ps1 from MEGA)
+- Chromium timestamp conversion working correctly
+
+---
+
+### 10. LNK File Parser (`user_parse_lnk_files`) ✅
+**Completed:** 2025-01-21
+
+**Files:**
+- `parsers/lnk_parser.py` (new)
+- `parsers/__init__.py` (updated)
+- `server.py` (updated)
+- `pyproject.toml` (added `pylnk3>=0.4.3`)
+
+**Features:**
+- Parse single .lnk file or directory of shortcuts
+- Extract target path, working directory, arguments
+- Extract timestamps (creation, modification, access)
+- Extract volume information (serial number, type, label)
+- Parse user's Recent folder for recently accessed files
+- Filter by target path or extension
+
+**Tool Parameters:**
+- `path` (required) - Path to .lnk file, directory, or user profile
+- `recursive` - Search subdirectories (default: true)
+- `target_filter` - Filter by target path
+- `recent_only` - Only search Recent folder (default: false)
+- `extension_filter` - Filter by original file extension
+- `limit` (default: 100)
+
+**Test Status:** Passed
+- Successfully parsed PowerView.lnk, mal.lnk, ntds.dit.lnk
+- Recent folder parsing working
+
+---
+
+### 11. ShellBags Parser (`user_parse_shellbags`) ✅
+**Completed:** 2025-01-21
+
+**Files:**
+- `parsers/shellbags_parser.py` (new)
+- `parsers/__init__.py` (updated)
+- `server.py` (updated)
+
+**Features:**
+- Parse ShellBags from UsrClass.dat registry hive
+- Reveal folder navigation history in Windows Explorer
+- Extract folder paths with timestamps
+- Parse shell item types (root folders, drives, file/folder entries)
+- Decode file entry extension blocks for long filenames
+- Known GUID mapping (My Computer, Downloads, Documents, etc.)
+- Suspicious folder detection (temp, AppData, network shares, hack tools)
+
+**Tool Parameters:**
+- `usrclass_path` (required) - Path to UsrClass.dat
+- `path_filter` - Filter by path substring
+- `suspicious_only` - Return only suspicious accesses (default: false)
+- `limit` (default: 100)
+
+**Test Status:** Passed
+- Alpha user: 29 folders found
+- Suspicious: Temp access, AppData\Roaming browsing
+- Tools detected: KAPE folder, mimikatz_trunk folder
+
+---
+
+## Phase 3 Complete ✅
+
+All Phase 3 user activity modules are now implemented:
+- [x] `browser_get_history` - Edge/Chrome/Firefox history ✅
+- [x] `user_parse_lnk_files` - LNK shortcut analysis ✅
+- [x] `user_parse_shellbags` - Folder navigation history ✅
+
+---
+
+## Pending Modules
 
 ### Phase 4: Integration
 - [ ] `hunt_ioc` - Cross-artifact IOC hunting
@@ -354,6 +452,7 @@ dependencies = [
     "libscca-python>=20240427", # v0.2.0 - Prefetch parsing
     "libesedb-python>=20240420", # v0.2.0 - SRUM ESE database parsing
     "mft>=0.7.0",               # v0.2.0 - MFT parsing (Rust-based)
+    "pylnk3>=0.4.3",            # v0.2.0 - LNK file parsing
 ]
 ```
 
@@ -368,6 +467,9 @@ dependencies = [
 - Amcache: `Windows/appcompat/Programs/Amcache.hve`
 - EVTX: `Windows/System32/winevt/Logs/`
 - PE files: Various in Sherlocks challenges
+- Browser History: `Users/Alpha/AppData/Local/Microsoft/Edge/User Data/Default/History`
+- LNK files: `Users/Alpha/AppData/Roaming/Microsoft/Windows/Recent/`
+- ShellBags: `Users/Alpha/AppData/Local/Microsoft/Windows/UsrClass.dat`
 
 ---
 

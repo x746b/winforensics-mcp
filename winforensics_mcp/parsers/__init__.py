@@ -66,6 +66,27 @@ from .usn_parser import (
     iter_usn_records,
 )
 
+from .browser_parser import (
+    parse_browser_history,
+    search_browser_history,
+    get_browser_downloads,
+)
+
+from .lnk_parser import (
+    parse_lnk_file,
+    parse_lnk_directory,
+    get_recent_files,
+    search_lnk_for_target,
+    PYLNK_AVAILABLE,
+)
+
+from .shellbags_parser import (
+    parse_shellbags,
+    search_shellbags,
+    get_recently_viewed_folders,
+    find_suspicious_folders,
+)
+
 __all__ = [
     # EVTX
     "get_evtx_events",
@@ -119,4 +140,19 @@ __all__ = [
     "get_file_operations_summary",
     "find_deleted_files",
     "iter_usn_records",
+    # Browser
+    "parse_browser_history",
+    "search_browser_history",
+    "get_browser_downloads",
+    # LNK
+    "parse_lnk_file",
+    "parse_lnk_directory",
+    "get_recent_files",
+    "search_lnk_for_target",
+    "PYLNK_AVAILABLE",
+    # ShellBags
+    "parse_shellbags",
+    "search_shellbags",
+    "get_recently_viewed_folders",
+    "find_suspicious_folders",
 ]
