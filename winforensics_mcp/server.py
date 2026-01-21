@@ -48,7 +48,7 @@ from .parsers import (
     find_suspicious_folders,
 )
 
-from .orchestrators import investigate_execution, build_timeline
+from .orchestrators import investigate_execution, build_timeline, hunt_ioc
 
 from .collectors import (
     WinRMCollector,
@@ -518,6 +518,66 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["artifacts_dir"],
+            },
+        )
+    )
+
+    # IOC Hunter orchestrator
+    tools.append(
+        Tool(
+            name="hunt_ioc",
+            description="Hunt for IOC (hash, filename, IP, domain) across all forensic artifacts. Searches Prefetch, Amcache, SRUM, MFT, USN Journal, Browser History, and EVTX logs. Answers: Where does this IOC appear? Was this file/hash/domain seen on the system?",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ioc": {
+                        "type": "string",
+                        "description": "The indicator to search for: MD5/SHA1/SHA256 hash, filename, IP address, or domain",
+                    },
+                    "artifacts_dir": {
+                        "type": "string",
+                        "description": "Base directory containing forensic artifacts. Tool will auto-detect common paths.",
+                    },
+                    "ioc_type": {
+                        "type": "string",
+                        "enum": ["auto", "md5", "sha1", "sha256", "ip", "domain", "filename"],
+                        "default": "auto",
+                        "description": "Type of IOC (auto-detected if not specified)",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events before this time",
+                    },
+                    "prefetch_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Prefetch directory path",
+                    },
+                    "amcache_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Amcache.hve path",
+                    },
+                    "srum_path": {
+                        "type": "string",
+                        "description": "Override auto-detected SRUDB.dat path",
+                    },
+                    "mft_path": {
+                        "type": "string",
+                        "description": "Override auto-detected $MFT path",
+                    },
+                    "usn_path": {
+                        "type": "string",
+                        "description": "Override auto-detected USN Journal path",
+                    },
+                    "evtx_path": {
+                        "type": "string",
+                        "description": "Override auto-detected EVTX directory path",
+                    },
+                },
+                "required": ["ioc", "artifacts_dir"],
             },
         )
     )
@@ -1000,6 +1060,22 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             usn_path=args.get("usn_path"),
             prefetch_path=args.get("prefetch_path"),
             amcache_path=args.get("amcache_path"),
+            evtx_path=args.get("evtx_path"),
+        )
+        return json_response(result)
+
+    elif name == "hunt_ioc":
+        result = hunt_ioc(
+            ioc=args["ioc"],
+            artifacts_dir=args["artifacts_dir"],
+            ioc_type=args.get("ioc_type", "auto"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            prefetch_path=args.get("prefetch_path"),
+            amcache_path=args.get("amcache_path"),
+            srum_path=args.get("srum_path"),
+            mft_path=args.get("mft_path"),
+            usn_path=args.get("usn_path"),
             evtx_path=args.get("evtx_path"),
         )
         return json_response(result)

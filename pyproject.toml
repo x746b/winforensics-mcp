@@ -1,6 +1,6 @@
 [project]
 name = "winforensics-mcp"
-version = "0.2.6"
+version = "0.2.7"
 description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, PE analysis, and remote artifact collection for DFIR"
 readme = "README.md"
 license = { text = "MIT" }
