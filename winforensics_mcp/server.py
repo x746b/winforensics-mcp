@@ -24,7 +24,17 @@ from .parsers import (
     get_user_accounts,
     get_network_interfaces,
     get_system_info,
+    analyze_pe,
+    PEFILE_AVAILABLE,
+    parse_prefetch_file,
+    parse_prefetch_directory,
+    PYSCCA_AVAILABLE,
+    parse_amcache,
+    parse_srum,
+    PYESEDB_AVAILABLE,
 )
+
+from .orchestrators import investigate_execution
 
 from .collectors import (
     WinRMCollector,
@@ -226,7 +236,204 @@ async def list_tools() -> list[Tool]:
             },
         ),
     ]
-    
+
+    # PE Analysis tools (if pefile available)
+    if PEFILE_AVAILABLE:
+        tools.append(
+            Tool(
+                name="file_analyze_pe",
+                description="Perform static analysis on Windows PE files (EXE/DLL/SYS). Extracts headers, imports, exports, sections, calculates hashes (MD5/SHA1/SHA256/Imphash), and detects packers/suspicious indicators.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to the PE file to analyze"},
+                        "calculate_hashes": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Calculate MD5, SHA1, SHA256, Imphash",
+                        },
+                        "extract_strings": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Extract ASCII/Unicode strings (can be verbose)",
+                        },
+                        "check_signatures": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Check for known packer/crypter signatures",
+                        },
+                        "detail_level": {
+                            "type": "string",
+                            "enum": ["minimal", "standard", "verbose"],
+                            "default": "standard",
+                            "description": "Level of detail: minimal (hashes+type), standard (+ sections/imports), verbose (+ all data)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+
+    # Prefetch parsing tools (if libscca available)
+    if PYSCCA_AVAILABLE:
+        tools.append(
+            Tool(
+                name="disk_parse_prefetch",
+                description="Parse Windows Prefetch files to determine program execution history, run counts, and last execution times. Can parse a single .pf file or an entire Prefetch directory.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to .pf file or Prefetch directory",
+                        },
+                        "executable_filter": {
+                            "type": "string",
+                            "description": "Filter by executable name (case-insensitive substring). Only applies to directory parsing.",
+                        },
+                        "include_loaded_files": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Include list of files/DLLs loaded by the executable",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum number of prefetch entries to return (for directory parsing)",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            )
+        )
+
+    # Amcache parsing tool (uses python-registry, always available)
+    tools.append(
+        Tool(
+            name="disk_parse_amcache",
+            description="Parse Amcache.hve to extract program execution evidence with SHA1 hashes, file paths, and timestamps. Proves a file existed and was prepared for execution.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "amcache_path": {
+                        "type": "string",
+                        "description": "Path to Amcache.hve file",
+                    },
+                    "sha1_filter": {
+                        "type": "string",
+                        "description": "Filter by SHA1 hash (case-insensitive)",
+                    },
+                    "path_filter": {
+                        "type": "string",
+                        "description": "Filter by file path (case-insensitive substring)",
+                    },
+                    "name_filter": {
+                        "type": "string",
+                        "description": "Filter by file name (case-insensitive substring)",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter entries after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter entries before this time",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum number of entries to return",
+                    },
+                },
+                "required": ["amcache_path"],
+            },
+        )
+    )
+
+    # SRUM parsing tool (if libesedb available)
+    if PYESEDB_AVAILABLE:
+        tools.append(
+            Tool(
+                name="disk_parse_srum",
+                description="Parse SRUDB.dat for application resource usage including CPU time, network bytes sent/received, and foreground time. Answers: How long did this program run? What was its network activity?",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "srum_path": {
+                            "type": "string",
+                            "description": "Path to SRUDB.dat file",
+                        },
+                        "table": {
+                            "type": "string",
+                            "enum": ["app_resource_usage", "network_data_usage", "all"],
+                            "default": "app_resource_usage",
+                            "description": "Which SRUM table to parse",
+                        },
+                        "app_filter": {
+                            "type": "string",
+                            "description": "Filter by application name (case-insensitive substring)",
+                        },
+                        "time_range_start": {
+                            "type": "string",
+                            "description": "ISO format datetime - filter entries after this time",
+                        },
+                        "time_range_end": {
+                            "type": "string",
+                            "description": "ISO format datetime - filter entries before this time",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum number of entries to return",
+                        },
+                    },
+                    "required": ["srum_path"],
+                },
+            )
+        )
+
+    # Execution investigation orchestrator
+    tools.append(
+        Tool(
+            name="investigate_execution",
+            description="Comprehensive execution analysis. Correlates Prefetch, Amcache, and SRUM to prove or disprove binary execution. Answers: Was this binary executed? When? How long did it run? Provides confidence scoring and unified timeline.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Executable name (e.g., 'mimikatz.exe'), file path, or SHA1 hash to investigate",
+                    },
+                    "artifacts_dir": {
+                        "type": "string",
+                        "description": "Base directory containing forensic artifacts (Prefetch, Amcache.hve, SRUDB.dat). Tool will auto-detect common paths.",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter events before this time",
+                    },
+                    "prefetch_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Prefetch directory path",
+                    },
+                    "amcache_path": {
+                        "type": "string",
+                        "description": "Override auto-detected Amcache.hve path",
+                    },
+                    "srum_path": {
+                        "type": "string",
+                        "description": "Override auto-detected SRUDB.dat path",
+                    },
+                },
+                "required": ["target", "artifacts_dir"],
+            },
+        )
+    )
+
     if WINRM_AVAILABLE:
         tools.extend([
             Tool(
@@ -371,7 +578,82 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         category = args.get("category")
         result = {category: FORENSIC_REGISTRY_KEYS.get(category, [])} if category else FORENSIC_REGISTRY_KEYS
         return json_response(result)
-    
+
+    elif name == "file_analyze_pe":
+        if not PEFILE_AVAILABLE:
+            return json_response({"error": "pefile library not installed. Install with: pip install pefile"})
+        result = analyze_pe(
+            args["file_path"],
+            calculate_hashes=args.get("calculate_hashes", True),
+            extract_strings_flag=args.get("extract_strings", False),
+            check_signatures=args.get("check_signatures", True),
+            detail_level=args.get("detail_level", "standard"),
+        )
+        return json_response(result)
+
+    elif name == "disk_parse_prefetch":
+        if not PYSCCA_AVAILABLE:
+            return json_response({"error": "libscca-python library not installed. Install with: pip install libscca-python"})
+
+        path = Path(args["path"])
+        include_loaded = args.get("include_loaded_files", False)
+
+        if path.is_file():
+            # Parse single prefetch file
+            result = parse_prefetch_file(
+                path,
+                include_loaded_files=include_loaded,
+            )
+        elif path.is_dir():
+            # Parse directory of prefetch files
+            result = parse_prefetch_directory(
+                path,
+                executable_filter=args.get("executable_filter"),
+                include_loaded_files=include_loaded,
+                limit=args.get("limit", 100),
+            )
+        else:
+            return json_response({"error": f"Path not found: {path}"})
+
+        return json_response(result)
+
+    elif name == "disk_parse_amcache":
+        result = parse_amcache(
+            args["amcache_path"],
+            sha1_filter=args.get("sha1_filter"),
+            path_filter=args.get("path_filter"),
+            name_filter=args.get("name_filter"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            limit=args.get("limit", 100),
+        )
+        return json_response(result)
+
+    elif name == "disk_parse_srum":
+        if not PYESEDB_AVAILABLE:
+            return json_response({"error": "libesedb-python library not installed. Install with: pip install libesedb-python"})
+        result = parse_srum(
+            args["srum_path"],
+            table=args.get("table", "app_resource_usage"),
+            app_filter=args.get("app_filter"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            limit=args.get("limit", 100),
+        )
+        return json_response(result)
+
+    elif name == "investigate_execution":
+        result = investigate_execution(
+            target=args["target"],
+            artifacts_dir=args["artifacts_dir"],
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            prefetch_path=args.get("prefetch_path"),
+            amcache_path=args.get("amcache_path"),
+            srum_path=args.get("srum_path"),
+        )
+        return json_response(result)
+
     elif name == "remote_collect_artifacts":
         if not WINRM_AVAILABLE:
             return json_response({"error": "pywinrm not installed"})

@@ -1,12 +1,12 @@
 [project]
 name = "winforensics-mcp"
-version = "0.1.0"
-description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, and remote artifact collection for DFIR"
+version = "0.2.0"
+description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, PE analysis, and remote artifact collection for DFIR"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "xtk" }]
 requires-python = ">=3.10"
-keywords = ["mcp", "forensics", "dfir", "evtx", "registry", "windows", "incident-response"]
+keywords = ["mcp", "forensics", "dfir", "evtx", "registry", "windows", "incident-response", "pe-analysis", "malware"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Information Technology",
@@ -22,6 +22,9 @@ dependencies = [
     "python-evtx>=0.7.0",
     "python-registry>=1.3.0",
     "python-dateutil>=2.8.2",
+    "pefile>=2023.2.7",
+    "libscca-python>=20240427",
+    "libesedb-python>=20240420",
 ]
 
 [project.optional-dependencies]
