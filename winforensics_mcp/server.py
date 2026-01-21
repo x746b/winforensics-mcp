@@ -56,7 +56,17 @@ from .collectors import (
     WINRM_AVAILABLE,
 )
 
-from .config import IMPORTANT_EVENT_IDS, FORENSIC_REGISTRY_KEYS
+from .config import (
+    IMPORTANT_EVENT_IDS,
+    FORENSIC_REGISTRY_KEYS,
+    MAX_EVTX_RESULTS,
+    MAX_REGISTRY_RESULTS,
+    MAX_PREFETCH_RESULTS,
+    MAX_AMCACHE_RESULTS,
+    MAX_TIMELINE_RESULTS,
+    MAX_MFT_RESULTS,
+    MAX_USN_RESULTS,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("winforensics-mcp")
@@ -109,7 +119,7 @@ async def list_tools() -> list[Tool]:
                     "contains": {"type": "array", "items": {"type": "string"}},
                     "not_contains": {"type": "array", "items": {"type": "string"}},
                     "provider": {"type": "string"},
-                    "limit": {"type": "integer", "default": 100},
+                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS},
                 },
                 "required": ["evtx_path"],
             },
@@ -128,7 +138,7 @@ async def list_tools() -> list[Tool]:
                                 "privilege_use", "log_cleared", "scheduled_task",
                                 "kerberos", "lateral_movement", "credential_access"],
                     },
-                    "limit": {"type": "integer", "default": 100},
+                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS},
                 },
                 "required": ["evtx_path", "event_type"],
             },
@@ -168,7 +178,7 @@ async def list_tools() -> list[Tool]:
                     "pattern": {"type": "string"},
                     "search_names": {"type": "boolean", "default": True},
                     "search_data": {"type": "boolean", "default": True},
-                    "limit": {"type": "integer", "default": 100},
+                    "limit": {"type": "integer", "default": MAX_REGISTRY_RESULTS},
                 },
                 "required": ["hive_path", "pattern"],
             },
@@ -312,7 +322,7 @@ async def list_tools() -> list[Tool]:
                         },
                         "limit": {
                             "type": "integer",
-                            "default": 100,
+                            "default": MAX_PREFETCH_RESULTS,
                             "description": "Maximum number of prefetch entries to return (for directory parsing)",
                         },
                     },
@@ -355,7 +365,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 100,
+                        "default": MAX_AMCACHE_RESULTS,
                         "description": "Maximum number of entries to return",
                     },
                 },
@@ -397,7 +407,7 @@ async def list_tools() -> list[Tool]:
                         },
                         "limit": {
                             "type": "integer",
-                            "default": 100,
+                            "default": MAX_AMCACHE_RESULTS,
                             "description": "Maximum number of entries to return",
                         },
                     },
@@ -483,7 +493,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 1000,
+                        "default": MAX_TIMELINE_RESULTS,
                         "description": "Maximum number of events to return",
                     },
                     "mft_path": {
@@ -564,7 +574,7 @@ async def list_tools() -> list[Tool]:
                         },
                         "limit": {
                             "type": "integer",
-                            "default": 100,
+                            "default": MAX_MFT_RESULTS,
                             "description": "Maximum number of entries to return",
                         },
                     },
@@ -624,7 +634,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 100,
+                        "default": MAX_USN_RESULTS,
                         "description": "Maximum number of records to return",
                     },
                 },
@@ -675,7 +685,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 100,
+                        "default": MAX_EVTX_RESULTS,
                         "description": "Maximum number of results per category",
                     },
                 },
@@ -717,7 +727,7 @@ async def list_tools() -> list[Tool]:
                         },
                         "limit": {
                             "type": "integer",
-                            "default": 100,
+                            "default": MAX_PREFETCH_RESULTS,
                             "description": "Maximum number of results",
                         },
                     },
@@ -749,7 +759,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 100,
+                        "default": MAX_REGISTRY_RESULTS,
                         "description": "Maximum number of results",
                     },
                 },
@@ -833,12 +843,12 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             contains=args.get("contains"),
             not_contains=args.get("not_contains"),
             provider=args.get("provider"),
-            limit=args.get("limit", 100),
+            limit=args.get("limit", MAX_EVTX_RESULTS),
         )
         return json_response(result)
-    
+
     elif name == "evtx_security_search":
-        result = search_security_events(args["evtx_path"], args["event_type"], limit=args.get("limit", 100))
+        result = search_security_events(args["evtx_path"], args["event_type"], limit=args.get("limit", MAX_EVTX_RESULTS))
         return json_response(result)
     
     elif name == "evtx_explain_event_id":
@@ -854,7 +864,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             args["hive_path"], args["pattern"],
             search_names=args.get("search_names", True),
             search_data=args.get("search_data", True),
-            limit=args.get("limit", 100),
+            limit=args.get("limit", MAX_REGISTRY_RESULTS),
         )
         return json_response(result)
     
@@ -934,7 +944,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 path,
                 executable_filter=args.get("executable_filter"),
                 include_loaded_files=include_loaded,
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_PREFETCH_RESULTS),
             )
         else:
             return json_response({"error": f"Path not found: {path}"})
@@ -949,7 +959,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             name_filter=args.get("name_filter"),
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
-            limit=args.get("limit", 100),
+            limit=args.get("limit", MAX_AMCACHE_RESULTS),
         )
         return json_response(result)
 
@@ -962,7 +972,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             app_filter=args.get("app_filter"),
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
-            limit=args.get("limit", 100),
+            limit=args.get("limit", MAX_AMCACHE_RESULTS),
         )
         return json_response(result)
 
@@ -985,7 +995,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
             keyword_filter=args.get("keyword_filter"),
-            limit=args.get("limit", 1000),
+            limit=args.get("limit", MAX_TIMELINE_RESULTS),
             mft_path=args.get("mft_path"),
             usn_path=args.get("usn_path"),
             prefetch_path=args.get("prefetch_path"),
@@ -1007,7 +1017,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             files_only=args.get("files_only", False),
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
-            limit=args.get("limit", 100),
+            limit=args.get("limit", MAX_MFT_RESULTS),
         )
         return json_response(result)
 
@@ -1026,7 +1036,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 extension_filter=args.get("extension_filter"),
                 time_range_start=args.get("time_range_start"),
                 time_range_end=args.get("time_range_end"),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_USN_RESULTS),
             )
         else:
             result = parse_usn_journal(
@@ -1037,7 +1047,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 time_range_end=args.get("time_range_end"),
                 interesting_only=args.get("interesting_only", False),
                 files_only=args.get("files_only", False),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_USN_RESULTS),
             )
         return json_response(result)
 
@@ -1050,7 +1060,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 dangerous_only=True,
                 time_range_start=args.get("time_range_start"),
                 time_range_end=args.get("time_range_end"),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_EVTX_RESULTS),
             )
         else:
             result = parse_browser_history(
@@ -1060,7 +1070,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 url_filter=args.get("url_filter"),
                 time_range_start=args.get("time_range_start"),
                 time_range_end=args.get("time_range_end"),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_EVTX_RESULTS),
             )
         return json_response(result)
 
@@ -1079,7 +1089,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             result = get_recent_files(
                 user_profile_path=path,
                 extension_filter=args.get("extension_filter"),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_PREFETCH_RESULTS),
             )
         else:
             # Parse directory of LNK files
@@ -1087,7 +1097,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 directory=path,
                 recursive=args.get("recursive", True),
                 target_filter=args.get("target_filter"),
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_PREFETCH_RESULTS),
             )
         return json_response(result)
 
@@ -1098,14 +1108,14 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         if suspicious_only:
             result = find_suspicious_folders(
                 usrclass_path=usrclass_path,
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_REGISTRY_RESULTS),
             )
         else:
             result = parse_shellbags(
                 usrclass_path=usrclass_path,
                 path_filter=args.get("path_filter"),
                 include_timestamps=True,
-                limit=args.get("limit", 100),
+                limit=args.get("limit", MAX_REGISTRY_RESULTS),
             )
         return json_response(result)
 

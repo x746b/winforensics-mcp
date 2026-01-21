@@ -307,10 +307,10 @@ def get_evtx_events(
     provider: Optional[str] = None,
     limit: int = MAX_EVTX_RESULTS,
     fields: Optional[Sequence[str]] = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
     Get events from an EVTX file with filtering.
-    
+
     Args:
         evtx_path: Path to the .evtx file
         start_time: Only return events after this time
@@ -321,12 +321,14 @@ def get_evtx_events(
         provider: Only return events from this provider
         limit: Maximum number of results to return
         fields: Only include these fields in output (for smaller responses)
-        
+
     Returns:
-        List of event dictionaries
+        Dict with events list and metadata (total_matched, returned, truncated)
     """
     results = []
-    
+    total_matched = 0
+    truncated = False
+
     for event in iter_evtx_events(
         evtx_path,
         start_time=start_time,
@@ -336,6 +338,13 @@ def get_evtx_events(
         not_contains=not_contains,
         provider=provider,
     ):
+        total_matched += 1
+
+        # Skip if we've hit the limit (but keep counting total)
+        if len(results) >= limit:
+            truncated = True
+            continue
+
         # Field projection
         if fields:
             projected = {}
@@ -358,13 +367,16 @@ def get_evtx_events(
         else:
             # Remove raw XML by default to save space
             event.pop("_raw_xml", None)
-        
+
         results.append(event)
-        
-        if len(results) >= limit:
-            break
-    
-    return results
+
+    return {
+        "events": results,
+        "total_matched": total_matched,
+        "returned": len(results),
+        "truncated": truncated,
+        "limit": limit,
+    }
 
 
 def list_evtx_files(
@@ -474,10 +486,10 @@ def search_security_events(
     evtx_path: str | Path,
     event_type: str,
     limit: int = MAX_EVTX_RESULTS,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
     Search for specific security event types.
-    
+
     Args:
         evtx_path: Path to Security.evtx file
         event_type: Type of events to search for:
@@ -493,9 +505,9 @@ def search_security_events(
             - "scheduled_task": Scheduled task events (4698-4702)
             - "kerberos": Kerberos events (4768-4771)
         limit: Maximum results
-        
+
     Returns:
-        List of matching events
+        Dict with events list and metadata (total_matched, returned, truncated)
     """
     event_type_map = {
         "logon": [4624],
