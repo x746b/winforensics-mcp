@@ -46,6 +46,7 @@ from .parsers import (
     PYLNK_AVAILABLE,
     parse_shellbags,
     find_suspicious_folders,
+    ingest_csv,
 )
 
 from .orchestrators import investigate_execution, build_timeline, hunt_ioc
@@ -582,6 +583,51 @@ async def list_tools() -> list[Tool]:
         )
     )
 
+    # CSV Ingestor tool (for Eric Zimmerman tool outputs)
+    tools.append(
+        Tool(
+            name="ingest_parsed_csv",
+            description="Import pre-parsed CSV from Eric Zimmerman tools (MFTECmd, PECmd, AmcacheParser, SrumECmd) for querying. Auto-detects CSV type by column headers. Useful when you already have parsed output from EZ tools.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "csv_path": {
+                        "type": "string",
+                        "description": "Path to the CSV file",
+                    },
+                    "csv_type": {
+                        "type": "string",
+                        "enum": ["auto", "mftecmd", "pecmd", "amcache", "srumemd"],
+                        "default": "auto",
+                        "description": "Type of CSV (auto-detected if not specified)",
+                    },
+                    "filter_field": {
+                        "type": "string",
+                        "description": "Field name to filter on (e.g., 'filename', 'sha1', 'executable')",
+                    },
+                    "filter_value": {
+                        "type": "string",
+                        "description": "Value to filter for (case-insensitive substring match)",
+                    },
+                    "time_range_start": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter entries after this time",
+                    },
+                    "time_range_end": {
+                        "type": "string",
+                        "description": "ISO format datetime - filter entries before this time",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum number of entries to return",
+                    },
+                },
+                "required": ["csv_path"],
+            },
+        )
+    )
+
     # MFT parsing tool (if mft library available)
     if MFT_AVAILABLE:
         tools.append(
@@ -1077,6 +1123,18 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             mft_path=args.get("mft_path"),
             usn_path=args.get("usn_path"),
             evtx_path=args.get("evtx_path"),
+        )
+        return json_response(result)
+
+    elif name == "ingest_parsed_csv":
+        result = ingest_csv(
+            csv_path=args["csv_path"],
+            csv_type=args.get("csv_type", "auto"),
+            filter_field=args.get("filter_field"),
+            filter_value=args.get("filter_value"),
+            time_range_start=args.get("time_range_start"),
+            time_range_end=args.get("time_range_end"),
+            limit=args.get("limit", 100),
         )
         return json_response(result)
 

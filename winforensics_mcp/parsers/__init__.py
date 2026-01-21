@@ -87,6 +87,13 @@ from .shellbags_parser import (
     find_suspicious_folders,
 )
 
+from .csv_ingestor import (
+    ingest_csv,
+    query_mftecmd_csv,
+    query_pecmd_csv,
+    query_amcache_csv,
+)
+
 __all__ = [
     # EVTX
     "get_evtx_events",
@@ -155,4 +162,9 @@ __all__ = [
     "search_shellbags",
     "get_recently_viewed_folders",
     "find_suspicious_folders",
+    # CSV Ingestor
+    "ingest_csv",
+    "query_mftecmd_csv",
+    "query_pecmd_csv",
+    "query_amcache_csv",
 ]
