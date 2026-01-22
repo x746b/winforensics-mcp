@@ -211,11 +211,11 @@ def json_response(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> str:
     # Add truncation metadata to response
     if isinstance(truncated_data, dict) and truncation_info:
         truncated_data["_truncation"] = {
-            "warning": "Response was truncated to fit context limits",
+            "warning": "Response was truncated to fit context limits. IMPORTANT: Oldest data was kept, newest may be missing!",
             "original_chars": len(result),
             "max_chars": max_chars,
             "truncated_arrays": truncation_info,
-            "hint": "Use smaller 'limit' parameter or add filters to reduce output"
+            "hint": "Use time_range_start/end to focus on incident window, or use offset parameter to paginate through all results"
         }
 
     return json.dumps(truncated_data, indent=2, default=str)

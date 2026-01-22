@@ -236,4 +236,5 @@ class TestResponseMetadata:
 
         if "_truncation" in parsed:
             assert "hint" in parsed["_truncation"]
-            assert "limit" in parsed["_truncation"]["hint"].lower() or "filter" in parsed["_truncation"]["hint"].lower()
+            hint = parsed["_truncation"]["hint"].lower()
+            assert "time_range" in hint or "offset" in hint or "paginate" in hint

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Limits for query results to avoid overwhelming LLM context
-MAX_EVTX_RESULTS = 50
+MAX_EVTX_RESULTS = 40
 MAX_REGISTRY_RESULTS = 50
 MAX_SCAN_EVENTS = 10000  # Max events to scan in a single file
 MAX_PREFETCH_RESULTS = 20
