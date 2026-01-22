@@ -147,6 +147,34 @@ claude mcp list
 
 ---
 
+## LLM Integration (CLAUDE.md)
+
+For AI-assisted forensic analysis, include [`CLAUDE.md`](CLAUDE.md) in your case directory. It provides:
+
+- **Orchestrator-first guidance** - Ensures LLMs use high-level tools before low-level parsers
+- **Token efficiency** - Reduces API costs by 50%+ through proper tool selection
+- **Investigation workflow** - Step-by-step methodology for consistent analysis
+
+### Usage
+
+Copy `CLAUDE.md` to your case directory:
+
+```bash
+cp /path/to/winforensics-mcp/CLAUDE.md /your/case/directory/
+# Edit paths in CLAUDE.md to match your case
+```
+
+The LLM will automatically follow the orchestrator-first approach:
+
+| Question | Orchestrator Used |
+|----------|------------------|
+| "Was malware.exe executed?" | `investigate_execution` |
+| "What did the user do?" | `investigate_user_activity` |
+| "Find this hash everywhere" | `hunt_ioc` |
+| "Build incident timeline" | `build_timeline` |
+
+---
+
 ## Quick Start Examples
 
 ### Was This Binary Executed?
