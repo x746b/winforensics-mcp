@@ -67,6 +67,8 @@ from .config import (
     MAX_TIMELINE_RESULTS,
     MAX_MFT_RESULTS,
     MAX_USN_RESULTS,
+    MAX_RESPONSE_CHARS,
+    TRUNCATE_KEEP_ITEMS,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -75,9 +77,148 @@ logger = logging.getLogger("winforensics-mcp")
 server = Server("winforensics-mcp")
 
 
-def json_response(data: Any) -> str:
-    """Convert data to JSON string for response"""
-    return json.dumps(data, indent=2, default=str)
+def _truncate_array(arr: list, keep: int = TRUNCATE_KEEP_ITEMS) -> tuple[list, int]:
+    """Truncate array keeping first N items, return (truncated_array, original_count)"""
+    if len(arr) <= keep:
+        return arr, len(arr)
+    return arr[:keep], len(arr)
+
+
+def _truncate_nested_arrays(item: dict, nested_keys: list[str], max_nested: int = 20) -> dict:
+    """Truncate nested arrays within an item (e.g., loaded_files within prefetch entry)"""
+    if not isinstance(item, dict):
+        return item
+    result = dict(item)
+    for key in nested_keys:
+        if key in result and isinstance(result[key], list) and len(result[key]) > max_nested:
+            original_len = len(result[key])
+            result[key] = result[key][:max_nested]
+            result[f"{key}_truncated"] = True
+            result[f"{key}_original_count"] = original_len
+    return result
+
+
+def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any, dict]:
+    """
+    Intelligently truncate response data to fit within max_chars.
+    Returns (truncated_data, truncation_info).
+
+    Strategy:
+    1. First truncate nested arrays within items (e.g., loaded_files)
+    2. Then reduce top-level array sizes progressively
+    3. Add truncation metadata
+    """
+    # Known array keys that can be truncated (in priority order)
+    ARRAY_KEYS = [
+        "events", "entries", "prefetch_entries", "records", "files",
+        "results", "timeline", "evidence", "matches", "history",
+        "downloads", "shellbags", "lnk_files", "loaded_files",
+        "run_keys", "services", "values", "subkeys"
+    ]
+
+    # Keys that contain nested arrays needing truncation
+    NESTED_ARRAY_KEYS = ["loaded_files", "volumes", "files", "references"]
+
+    truncation_info = {}
+
+    # First, check if we're already under the limit
+    initial_json = json.dumps(data, indent=2, default=str)
+    if len(initial_json) <= max_chars:
+        return data, truncation_info
+
+    # If data is not a dict, we can't smart-truncate, just report the issue
+    if not isinstance(data, dict):
+        truncation_info["warning"] = f"Response too large ({len(initial_json)} chars), cannot auto-truncate non-dict"
+        return data, truncation_info
+
+    # Find and progressively truncate arrays
+    modified = dict(data)  # Shallow copy
+
+    # Step 1: Truncate nested arrays within items first
+    for key in ARRAY_KEYS:
+        if key not in modified:
+            continue
+        arr = modified[key]
+        if not isinstance(arr, list) or len(arr) == 0:
+            continue
+
+        # Truncate nested arrays within each item
+        modified[key] = [_truncate_nested_arrays(item, NESTED_ARRAY_KEYS) for item in arr]
+
+    # Check if nested truncation was enough
+    current_json = json.dumps(modified, indent=2, default=str)
+    if len(current_json) <= max_chars:
+        return modified, truncation_info
+
+    # Step 2: Truncate top-level arrays
+    for key in ARRAY_KEYS:
+        if key not in modified:
+            continue
+        arr = modified[key]
+        if not isinstance(arr, list) or len(arr) == 0:
+            continue
+
+        # Calculate how much we need to reduce
+        current_json = json.dumps(modified, indent=2, default=str)
+        if len(current_json) <= max_chars:
+            break
+
+        # Estimate items to keep based on average item size
+        arr_json = json.dumps(arr, indent=2, default=str)
+        if len(arr) > 0:
+            avg_item_size = len(arr_json) / len(arr)
+            excess_chars = len(current_json) - max_chars
+            items_to_remove = int(excess_chars / avg_item_size) + 1
+            keep_count = max(TRUNCATE_KEEP_ITEMS, len(arr) - items_to_remove)
+
+            if keep_count < len(arr):
+                truncation_info[key] = {
+                    "original_count": len(arr),
+                    "returned_count": keep_count,
+                    "truncated": True
+                }
+                modified[key] = arr[:keep_count]
+
+    # Final check - if still too large, do aggressive truncation
+    final_json = json.dumps(modified, indent=2, default=str)
+    if len(final_json) > max_chars:
+        # Aggressive: reduce all arrays to minimum
+        for key in ARRAY_KEYS:
+            if key in modified and isinstance(modified[key], list) and len(modified[key]) > TRUNCATE_KEEP_ITEMS:
+                original_len = truncation_info.get(key, {}).get("original_count", len(modified[key]))
+                modified[key] = modified[key][:TRUNCATE_KEEP_ITEMS]
+                truncation_info[key] = {
+                    "original_count": original_len,
+                    "returned_count": TRUNCATE_KEEP_ITEMS,
+                    "truncated": True
+                }
+
+    return modified, truncation_info
+
+
+def json_response(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> str:
+    """Convert data to JSON string for response, with smart truncation if too large"""
+
+    # Try without truncation first
+    result = json.dumps(data, indent=2, default=str)
+
+    if len(result) <= max_chars:
+        return result
+
+    # Apply smart truncation
+    truncated_data, truncation_info = _smart_truncate(data, max_chars)
+
+    # Add truncation metadata to response
+    if isinstance(truncated_data, dict) and truncation_info:
+        truncated_data["_truncation"] = {
+            "warning": "Response was truncated to fit context limits",
+            "original_chars": len(result),
+            "max_chars": max_chars,
+            "truncated_arrays": truncation_info,
+            "hint": "Use smaller 'limit' parameter or add filters to reduce output"
+        }
+
+    return json.dumps(truncated_data, indent=2, default=str)
 
 
 @server.list_tools()
@@ -109,7 +250,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="evtx_search",
-            description="Search events from EVTX file. Filter by time, Event ID, keywords, provider.",
+            description="Search events from EVTX file. Filter by time, Event ID, keywords, provider. Supports pagination with offset.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -120,14 +261,15 @@ async def list_tools() -> list[Tool]:
                     "contains": {"type": "array", "items": {"type": "string"}},
                     "not_contains": {"type": "array", "items": {"type": "string"}},
                     "provider": {"type": "string"},
-                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS},
+                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS, "description": "Max results to return (default 50)"},
+                    "offset": {"type": "integer", "default": 0, "description": "Skip first N matches for pagination"},
                 },
                 "required": ["evtx_path"],
             },
         ),
         Tool(
             name="evtx_security_search",
-            description="Search for security events by type: logon, failed_logon, process_creation, etc.",
+            description="Search for security events by type: logon, failed_logon, process_creation, etc. Supports pagination with offset.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -139,7 +281,8 @@ async def list_tools() -> list[Tool]:
                                 "privilege_use", "log_cleared", "scheduled_task",
                                 "kerberos", "lateral_movement", "credential_access"],
                     },
-                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS},
+                    "limit": {"type": "integer", "default": MAX_EVTX_RESULTS, "description": "Max results to return (default 50)"},
+                    "offset": {"type": "integer", "default": 0, "description": "Skip first N matches for pagination"},
                 },
                 "required": ["evtx_path", "event_type"],
             },
@@ -304,7 +447,7 @@ async def list_tools() -> list[Tool]:
         tools.append(
             Tool(
                 name="disk_parse_prefetch",
-                description="Parse Windows Prefetch files to determine program execution history, run counts, and last execution times. Can parse a single .pf file or an entire Prefetch directory.",
+                description="Parse Windows Prefetch files to determine program execution history, run counts, and last execution times. Can parse a single .pf file or an entire Prefetch directory. Supports pagination.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -319,12 +462,17 @@ async def list_tools() -> list[Tool]:
                         "include_loaded_files": {
                             "type": "boolean",
                             "default": False,
-                            "description": "Include list of files/DLLs loaded by the executable",
+                            "description": "Include list of files/DLLs loaded by the executable (WARNING: increases output size significantly)",
                         },
                         "limit": {
                             "type": "integer",
                             "default": MAX_PREFETCH_RESULTS,
-                            "description": "Maximum number of prefetch entries to return (for directory parsing)",
+                            "description": "Maximum number of prefetch entries to return (default 20)",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Skip first N entries for pagination",
                         },
                     },
                     "required": ["path"],
@@ -1000,7 +1148,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             start_time = datetime.fromisoformat(args["start_time"].replace("Z", "+00:00"))
         if args.get("end_time"):
             end_time = datetime.fromisoformat(args["end_time"].replace("Z", "+00:00"))
-        
+
         result = get_evtx_events(
             args["evtx_path"],
             start_time=start_time,
@@ -1010,11 +1158,17 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             not_contains=args.get("not_contains"),
             provider=args.get("provider"),
             limit=args.get("limit", MAX_EVTX_RESULTS),
+            offset=args.get("offset", 0),
         )
         return json_response(result)
 
     elif name == "evtx_security_search":
-        result = search_security_events(args["evtx_path"], args["event_type"], limit=args.get("limit", MAX_EVTX_RESULTS))
+        result = search_security_events(
+            args["evtx_path"],
+            args["event_type"],
+            limit=args.get("limit", MAX_EVTX_RESULTS),
+            offset=args.get("offset", 0),
+        )
         return json_response(result)
     
     elif name == "evtx_explain_event_id":
@@ -1111,6 +1265,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 executable_filter=args.get("executable_filter"),
                 include_loaded_files=include_loaded,
                 limit=args.get("limit", MAX_PREFETCH_RESULTS),
+                offset=args.get("offset", 0),
             )
         else:
             return json_response({"error": f"Path not found: {path}"})

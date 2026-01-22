@@ -13,7 +13,7 @@ class TestVersionAndMetadata:
 
     def test_version(self):
         from winforensics_mcp import __version__
-        assert __version__ == "0.3.0"
+        assert __version__ == "0.3.1"
 
     def test_author(self):
         from winforensics_mcp import __author__
@@ -43,6 +43,8 @@ class TestConfigImports:
             MAX_TIMELINE_RESULTS,
             MAX_MFT_RESULTS,
             MAX_USN_RESULTS,
+            MAX_RESPONSE_CHARS,
+            TRUNCATE_KEEP_ITEMS,
         )
         # All limits should be positive integers
         assert all(isinstance(x, int) and x > 0 for x in [
@@ -53,6 +55,8 @@ class TestConfigImports:
             MAX_TIMELINE_RESULTS,
             MAX_MFT_RESULTS,
             MAX_USN_RESULTS,
+            MAX_RESPONSE_CHARS,
+            TRUNCATE_KEEP_ITEMS,
         ])
 
 

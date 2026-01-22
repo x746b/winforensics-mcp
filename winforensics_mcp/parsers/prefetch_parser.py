@@ -150,6 +150,7 @@ def parse_prefetch_directory(
     executable_filter: Optional[str] = None,
     include_loaded_files: bool = False,
     limit: int = MAX_EVTX_RESULTS,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """
     Parse all Prefetch files in a directory.
@@ -159,6 +160,7 @@ def parse_prefetch_directory(
         executable_filter: Filter by executable name (case-insensitive substring)
         include_loaded_files: Include loaded files for each prefetch entry
         limit: Maximum number of results
+        offset: Number of results to skip (for pagination)
 
     Returns:
         Dictionary with list of parsed prefetch files
@@ -174,15 +176,15 @@ def parse_prefetch_directory(
 
     results = []
     errors = []
+    matched_count = 0
+    skipped = 0
+    truncated = False
     filter_lower = executable_filter.lower() if executable_filter else None
 
     # Find all .pf files
     pf_files = sorted(directory.glob("*.pf"), key=lambda p: p.stat().st_mtime, reverse=True)
 
     for pf_path in pf_files:
-        if len(results) >= limit:
-            break
-
         try:
             parsed = parse_prefetch_file(
                 pf_path,
@@ -196,6 +198,18 @@ def parse_prefetch_directory(
                 if filter_lower not in exe_name:
                     continue
 
+            matched_count += 1
+
+            # Skip for pagination offset
+            if skipped < offset:
+                skipped += 1
+                continue
+
+            # Check limit
+            if len(results) >= limit:
+                truncated = True
+                continue  # Keep counting matches
+
             results.append(parsed)
 
         except Exception as e:
@@ -207,7 +221,11 @@ def parse_prefetch_directory(
     return {
         "directory": str(directory),
         "total_files": len(pf_files),
+        "total_matched": matched_count,
         "parsed_count": len(results),
+        "offset": offset,
+        "truncated": truncated,
+        "next_offset": offset + len(results) if truncated else None,
         "prefetch_entries": results,
         "errors": errors if errors else None,
     }

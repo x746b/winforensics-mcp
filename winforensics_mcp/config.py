@@ -12,6 +12,12 @@ MAX_TIMELINE_RESULTS = 50
 MAX_MFT_RESULTS = 30
 MAX_USN_RESULTS = 30
 
+# Response size limits (characters) - prevents token overflow
+# ~4 chars per token, so 40000 chars ≈ 10k tokens
+MAX_RESPONSE_CHARS = 40000
+# When truncating arrays, keep this many items for context
+TRUNCATE_KEEP_ITEMS = 10
+
 # Default paths for Windows artifacts (when analyzing mounted images or remote shares)
 WINDOWS_ARTIFACT_PATHS = {
     "evtx": [

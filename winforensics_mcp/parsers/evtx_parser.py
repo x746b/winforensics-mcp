@@ -306,6 +306,7 @@ def get_evtx_events(
     not_contains: Optional[Sequence[str]] = None,
     provider: Optional[str] = None,
     limit: int = MAX_EVTX_RESULTS,
+    offset: int = 0,
     fields: Optional[Sequence[str]] = None,
 ) -> dict[str, Any]:
     """
@@ -320,6 +321,7 @@ def get_evtx_events(
         not_contains: Exclude events containing ANY of these strings
         provider: Only return events from this provider
         limit: Maximum number of results to return
+        offset: Number of matching events to skip (for pagination)
         fields: Only include these fields in output (for smaller responses)
 
     Returns:
@@ -327,6 +329,7 @@ def get_evtx_events(
     """
     results = []
     total_matched = 0
+    skipped = 0
     truncated = False
 
     for event in iter_evtx_events(
@@ -339,6 +342,11 @@ def get_evtx_events(
         provider=provider,
     ):
         total_matched += 1
+
+        # Skip events for pagination offset
+        if skipped < offset:
+            skipped += 1
+            continue
 
         # Skip if we've hit the limit (but keep counting total)
         if len(results) >= limit:
@@ -374,8 +382,10 @@ def get_evtx_events(
         "events": results,
         "total_matched": total_matched,
         "returned": len(results),
+        "offset": offset,
         "truncated": truncated,
         "limit": limit,
+        "next_offset": offset + len(results) if truncated else None,
     }
 
 
@@ -486,6 +496,7 @@ def search_security_events(
     evtx_path: str | Path,
     event_type: str,
     limit: int = MAX_EVTX_RESULTS,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """
     Search for specific security event types.
@@ -505,6 +516,7 @@ def search_security_events(
             - "scheduled_task": Scheduled task events (4698-4702)
             - "kerberos": Kerberos events (4768-4771)
         limit: Maximum results
+        offset: Number of matching events to skip (for pagination)
 
     Returns:
         Dict with events list and metadata (total_matched, returned, truncated)
@@ -524,13 +536,13 @@ def search_security_events(
         "lateral_movement": [4624, 4648, 4778, 4779],
         "credential_access": [4768, 4769, 4771, 4776],
     }
-    
+
     event_ids = event_type_map.get(event_type.lower())
     if not event_ids:
         available = ", ".join(event_type_map.keys())
         raise ValueError(f"Unknown event type: {event_type}. Available: {available}")
-    
-    return get_evtx_events(evtx_path, event_ids=event_ids, limit=limit)
+
+    return get_evtx_events(evtx_path, event_ids=event_ids, limit=limit, offset=offset)
 
 
 def get_event_id_description(event_id: int, channel: str = "Security") -> str:

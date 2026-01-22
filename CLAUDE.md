@@ -113,3 +113,35 @@ hunt_ioc(
 3. **Use keyword_filter**: Reduces noise significantly
 4. **Trust confidence scores**: HIGH confidence = stop investigating that question
 5. **Batch related questions**: One `build_timeline` call can answer multiple time-based questions
+
+## Controlling Response Size:
+
+Responses are automatically truncated at ~40,000 characters (~10k tokens) to prevent context overflow.
+When truncation occurs, you'll see a `_truncation` field with details.
+
+### Best Practices to Avoid Large Responses:
+
+| Parameter | Impact | Recommendation |
+|-----------|--------|----------------|
+| `limit` | Primary size control | Keep at defaults (20-50) unless you need more |
+| `offset` | Pagination support | Use to page through large result sets |
+| `include_loaded_files` | Adds ~500 files per prefetch entry | Keep `false` unless investigating DLL loading |
+| `output_mode` | Controls verbosity | Use `summary` (default) over `full` |
+| `time_range_*` | Filters by time | Always specify when investigating a known incident window |
+| `keyword_filter` | Text filtering | Narrow to relevant executables/paths |
+
+### Pagination Example:
+```python
+# Page 1: First 20 results
+evtx_security_search(evtx_path="...", event_type="process_creation", limit=20, offset=0)
+# Response includes: "next_offset": 20, "truncated": true
+
+# Page 2: Next 20 results
+evtx_security_search(evtx_path="...", event_type="process_creation", limit=20, offset=20)
+```
+
+### If You See Truncation Warnings:
+1. Add time filters (`time_range_start`/`time_range_end`)
+2. Add keyword filters (`keyword_filter`, `executable_filter`, `path_filter`)
+3. Reduce `limit` parameter
+4. Use pagination with `offset` to retrieve data in chunks
