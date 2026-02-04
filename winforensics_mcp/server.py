@@ -1094,7 +1094,7 @@ async def list_tools() -> list[Tool]:
     tools.append(
         Tool(
             name="hunt_ioc",
-            description="Hunt for IOC (hash, filename, IP, domain) across all forensic artifacts. Searches Prefetch, Amcache, SRUM, MFT, USN Journal, Browser History, and EVTX logs. Answers: Where does this IOC appear? Was this file/hash/domain seen on the system?",
+            description="Hunt for IOC (hash, filename, IP, domain) across all forensic artifacts. Searches Prefetch, Amcache, SRUM, MFT, USN Journal, Browser History, EVTX logs, and optionally YARA rules. Answers: Where does this IOC appear? Was this file/hash/domain seen on the system? Is it known malware?",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1119,6 +1119,11 @@ async def list_tools() -> list[Tool]:
                     "time_range_end": {
                         "type": "string",
                         "description": "ISO format datetime - filter events before this time",
+                    },
+                    "yara_scan": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If True, scan the file with YARA rules when IOC is a filename and file is found. Provides threat intelligence (is it known malware?).",
                     },
                     "prefetch_path": {
                         "type": "string",
@@ -1951,6 +1956,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             ioc_type=args.get("ioc_type", "auto"),
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
+            yara_scan=args.get("yara_scan", False),
             prefetch_path=args.get("prefetch_path"),
             amcache_path=args.get("amcache_path"),
             srum_path=args.get("srum_path"),

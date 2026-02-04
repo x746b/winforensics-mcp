@@ -41,6 +41,10 @@ from ..parsers.evtx_parser import (
     get_evtx_events,
     EVTX_AVAILABLE,
 )
+from ..parsers.yara_scanner import (
+    scan_file as yara_scan_file,
+    YARA_AVAILABLE,
+)
 
 # Extended artifact paths for IOC hunting
 IOC_ARTIFACT_PATHS = {
@@ -642,6 +646,126 @@ def _search_browser_ioc(
         }
 
 
+def _find_file_in_artifacts(
+    artifacts_dir: Path,
+    filename: str,
+) -> Optional[Path]:
+    """
+    Search for a file by name within the artifacts directory.
+    Returns the first match found.
+    """
+    # Extract just the filename if path was provided
+    if '\\' in filename:
+        filename = filename.split('\\')[-1]
+    if '/' in filename:
+        filename = filename.split('/')[-1]
+
+    # Search recursively for the file
+    for found_file in artifacts_dir.rglob(filename):
+        if found_file.is_file():
+            return found_file
+
+    # Also try case-insensitive search
+    filename_lower = filename.lower()
+    for found_file in artifacts_dir.rglob("*"):
+        if found_file.is_file() and found_file.name.lower() == filename_lower:
+            return found_file
+
+    return None
+
+
+def _search_yara_ioc(
+    artifacts_dir: Path,
+    ioc: str,
+    ioc_type: str,
+) -> dict[str, Any]:
+    """Search for file and scan with YARA rules (filename IOCs only)"""
+    if not YARA_AVAILABLE:
+        return {
+            "source": "YARA",
+            "available": False,
+            "error": "yara-python not installed",
+        }
+
+    # YARA scanning only makes sense for filename IOCs
+    if ioc_type not in ("filename",):
+        return {
+            "source": "YARA",
+            "available": True,
+            "searched": False,
+            "note": f"YARA scanning requires actual file, not applicable for {ioc_type} IOC",
+        }
+
+    try:
+        # Find the file in artifacts
+        file_path = _find_file_in_artifacts(artifacts_dir, ioc)
+
+        if not file_path:
+            return {
+                "source": "YARA",
+                "available": True,
+                "searched": False,
+                "note": f"File '{ioc}' not found in artifacts directory",
+            }
+
+        # Scan with YARA
+        result = yara_scan_file(file_path, timeout=30)
+
+        if result.get("error"):
+            return {
+                "source": "YARA",
+                "available": True,
+                "searched": True,
+                "found": False,
+                "file_scanned": str(file_path),
+                "error": result["error"],
+            }
+
+        matches = result.get("matches", [])
+
+        if not matches:
+            return {
+                "source": "YARA",
+                "available": True,
+                "searched": True,
+                "found": False,
+                "file_scanned": str(file_path),
+                "file_size": result.get("file_size"),
+                "scan_time_ms": result.get("scan_time_ms"),
+            }
+
+        # Format matches for output
+        formatted_matches = []
+        for match in matches[:10]:  # Limit to 10 matches
+            formatted_matches.append({
+                "rule": match.get("rule"),
+                "namespace": match.get("namespace"),
+                "tags": match.get("tags", []),
+                "meta": match.get("meta", {}),
+            })
+
+        return {
+            "source": "YARA",
+            "available": True,
+            "searched": True,
+            "found": True,
+            "file_scanned": str(file_path),
+            "file_size": result.get("file_size"),
+            "scan_time_ms": result.get("scan_time_ms"),
+            "matches": formatted_matches,
+            "match_count": len(matches),
+        }
+
+    except Exception as e:
+        return {
+            "source": "YARA",
+            "available": True,
+            "searched": True,
+            "found": False,
+            "error": str(e),
+        }
+
+
 def _search_evtx_ioc(
     evtx_dir: Path,
     ioc: str,
@@ -757,6 +881,7 @@ def hunt_ioc(
     ioc_type: Optional[str] = None,
     time_range_start: Optional[str] = None,
     time_range_end: Optional[str] = None,
+    yara_scan: bool = False,
     prefetch_path: Optional[str] = None,
     amcache_path: Optional[str] = None,
     srum_path: Optional[str] = None,
@@ -774,6 +899,8 @@ def hunt_ioc(
                   md5, sha1, sha256, ip, domain, filename
         time_range_start: ISO format datetime, filter events after this time
         time_range_end: ISO format datetime, filter events before this time
+        yara_scan: If True, scan the file with YARA rules when IOC is a filename
+                   and the file is found in artifacts. Adds threat intelligence.
         prefetch_path: Override auto-detected Prefetch directory
         amcache_path: Override auto-detected Amcache.hve path
         srum_path: Override auto-detected SRUDB.dat path
@@ -812,6 +939,7 @@ def hunt_ioc(
         "usn": usn_file is not None and usn_file.exists(),
         "browser": len(browser_paths) > 0,
         "evtx": evtx_dir is not None and evtx_dir.exists(),
+        "yara": yara_scan and YARA_AVAILABLE,
     }
 
     results = []
@@ -878,6 +1006,17 @@ def hunt_ioc(
             "source": "EVTX",
             "available": False,
             "error": "EVTX directory not found",
+        })
+
+    # YARA scan (opt-in, filename IOCs only)
+    if yara_scan:
+        results.append(_search_yara_ioc(artifacts_dir, ioc, final_type))
+    else:
+        results.append({
+            "source": "YARA",
+            "available": YARA_AVAILABLE,
+            "searched": False,
+            "note": "YARA scanning disabled (set yara_scan=True to enable)",
         })
 
     # Calculate overall confidence

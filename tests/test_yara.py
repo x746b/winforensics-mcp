@@ -237,3 +237,150 @@ class TestYaraAvailabilityHandling:
         # This should not raise even if yara-python is not installed
         result = list_rules()
         assert "rule_files" in result
+
+
+class TestHuntIocYaraIntegration:
+    """Test YARA integration in hunt_ioc orchestrator."""
+
+    def test_hunt_ioc_yara_disabled_by_default(self):
+        """YARA scanning should be disabled by default."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = hunt_ioc(
+                ioc="test.exe",
+                artifacts_dir=tmpdir,
+                yara_scan=False,
+            )
+
+            # Find the YARA result
+            yara_result = None
+            for r in result.get("results", []):
+                if r.get("source") == "YARA":
+                    yara_result = r
+                    break
+
+            assert yara_result is not None
+            assert yara_result["searched"] is False
+            assert "disabled" in yara_result.get("note", "").lower()
+
+    def test_hunt_ioc_yara_not_applicable_for_hash(self):
+        """YARA scanning should not apply to hash IOCs."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = hunt_ioc(
+                ioc="abc123def456789012345678901234567890abcd",  # SHA1-like
+                artifacts_dir=tmpdir,
+                ioc_type="sha1",
+                yara_scan=True,
+            )
+
+            # Find the YARA result
+            yara_result = None
+            for r in result.get("results", []):
+                if r.get("source") == "YARA":
+                    yara_result = r
+                    break
+
+            assert yara_result is not None
+            assert yara_result["searched"] is False
+            assert "not applicable" in yara_result.get("note", "").lower()
+
+    def test_hunt_ioc_yara_file_not_found(self):
+        """YARA should report when file is not found in artifacts."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+        from winforensics_mcp.parsers.yara_scanner import YARA_AVAILABLE
+
+        if not YARA_AVAILABLE:
+            pytest.skip("yara-python not installed")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = hunt_ioc(
+                ioc="nonexistent_malware.exe",
+                artifacts_dir=tmpdir,
+                yara_scan=True,
+            )
+
+            # Find the YARA result
+            yara_result = None
+            for r in result.get("results", []):
+                if r.get("source") == "YARA":
+                    yara_result = r
+                    break
+
+            assert yara_result is not None
+            assert yara_result["searched"] is False
+            assert "not found" in yara_result.get("note", "").lower()
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("yara", reason="yara-python not installed"),
+        reason="yara-python not installed"
+    )
+    def test_hunt_ioc_yara_scans_found_file(self):
+        """YARA should scan file when found in artifacts."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+        from winforensics_mcp.parsers.yara_scanner import YARA_AVAILABLE
+
+        if not YARA_AVAILABLE:
+            pytest.skip("yara-python not installed")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a test file
+            test_file = Path(tmpdir) / "test_program.exe"
+            test_file.write_text("This is harmless test content")
+
+            result = hunt_ioc(
+                ioc="test_program.exe",
+                artifacts_dir=tmpdir,
+                yara_scan=True,
+            )
+
+            # Find the YARA result
+            yara_result = None
+            for r in result.get("results", []):
+                if r.get("source") == "YARA":
+                    yara_result = r
+                    break
+
+            assert yara_result is not None
+            assert yara_result["searched"] is True
+            assert yara_result["available"] is True
+            assert "file_scanned" in yara_result
+            assert str(test_file) in yara_result["file_scanned"]
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("yara", reason="yara-python not installed"),
+        reason="yara-python not installed"
+    )
+    def test_hunt_ioc_yara_in_artifacts_searched(self):
+        """YARA should be tracked in artifacts_searched."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+        from winforensics_mcp.parsers.yara_scanner import YARA_AVAILABLE
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = hunt_ioc(
+                ioc="test.exe",
+                artifacts_dir=tmpdir,
+                yara_scan=True,
+            )
+
+            assert "artifacts_searched" in result
+            assert "yara" in result["artifacts_searched"]
+            # Should be True if YARA is available and enabled
+            assert result["artifacts_searched"]["yara"] == YARA_AVAILABLE
+
+    def test_hunt_ioc_yara_disabled_in_artifacts_searched(self):
+        """YARA should be False in artifacts_searched when disabled."""
+        from winforensics_mcp.orchestrators import hunt_ioc
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = hunt_ioc(
+                ioc="test.exe",
+                artifacts_dir=tmpdir,
+                yara_scan=False,
+            )
+
+            assert "artifacts_searched" in result
+            assert "yara" in result["artifacts_searched"]
+            assert result["artifacts_searched"]["yara"] is False

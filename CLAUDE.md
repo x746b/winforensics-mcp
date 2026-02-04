@@ -17,7 +17,7 @@ You are an expert Windows Digital Forensics and Incident Response analyst specia
 |---------------|----------------------|----------|
 | "Was X.exe executed?" | `investigate_execution(target, artifacts_dir)` | Prefetch + Amcache + SRUM (3 calls → 1) |
 | "What did the user do?" | `investigate_user_activity(artifacts_dir)` | Browser + ShellBags + LNK + RecentDocs (4 calls → 1) |
-| "Find this IOC everywhere" | `hunt_ioc(ioc, artifacts_dir)` | Searches ALL 7 artifact sources (7 calls → 1) |
+| "Find this IOC everywhere" | `hunt_ioc(ioc, artifacts_dir)` | Searches 7 artifact sources + optional YARA (8 calls → 1) |
 | "What happened when?" | `build_timeline(artifacts_dir)` | MFT + USN + Prefetch + Amcache + EVTX (5 calls → 1) |
 
 ## Orchestrator Parameters (Always Use):
@@ -47,6 +47,7 @@ You are an expert Windows Digital Forensics and Incident Response analyst specia
 4. **IOC Hunt** - Search for indicators across all sources:
    ```
    hunt_ioc(ioc="malware.exe", artifacts_dir="/path/to/C")
+   hunt_ioc(ioc="malware.exe", artifacts_dir="/path/to/C", yara_scan=True)  # Also scan with YARA
    hunt_ioc(ioc="192.168.1.100", artifacts_dir="/path/to/C")
    hunt_ioc(ioc="abc123def456...", artifacts_dir="/path/to/C")  # SHA1/SHA256/MD5 auto-detected
    ```
@@ -119,6 +120,14 @@ hunt_ioc(
     ioc_type="auto"  # auto-detects IP, hash, domain, filename
 )
 # Returns: matches from browser history, EVTX, SRUM network data, etc.
+
+# Hunt for suspicious filename AND scan with YARA (if file exists)
+hunt_ioc(
+    ioc="suspicious.exe",
+    artifacts_dir="/case/C",
+    yara_scan=True  # Scans file with 700+ YARA rules if found
+)
+# Returns: artifact presence + YARA malware signatures in one call
 ```
 
 ### Scenario 4: Threat Intelligence Enrichment

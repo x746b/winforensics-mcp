@@ -70,7 +70,7 @@ Traditional Windows forensics often requires:
 |------|--------------|
 | `investigate_execution` | Correlates Prefetch + Amcache + SRUM to answer "Was this binary executed?" |
 | `investigate_user_activity` | Correlates Browser + ShellBags + LNK + RecentDocs for user activity timeline |
-| `hunt_ioc` | Searches for IOC (hash/filename/IP/domain) across ALL artifact sources |
+| `hunt_ioc` | Searches for IOC (hash/filename/IP/domain) across ALL artifact sources + optional YARA scanning |
 | `build_timeline` | Builds unified forensic timeline from multiple sources |
 
 ### Utilities
@@ -229,7 +229,7 @@ The `investigate_execution` orchestrator checks Prefetch, Amcache, and SRUM:
 Hunt for the hash 204bc44c651e17f65c95314e0b6dfee586b72089 in /mnt/evidence
 ```
 
-The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, and EVTX:
+The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, and optionally YARA:
 
 ```json
 {
@@ -241,6 +241,29 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, and EVT
   "findings": [
     {"source": "Amcache", "matches": 1, "details": "bloodhound.exe"},
     {"source": "MFT", "matches": 1, "details": "Users\\Admin\\Downloads\\bloodhound.exe"}
+  ]
+}
+```
+
+#### Hunt with YARA Scanning
+
+For filename IOCs, enable YARA scanning to get threat intelligence in the same call:
+
+```
+Hunt for suspicious.exe in /mnt/evidence with YARA scanning enabled
+```
+
+```json
+{
+  "ioc": "suspicious.exe",
+  "ioc_type": "filename",
+  "found": true,
+  "confidence": "HIGH",
+  "sources_with_hits": ["Prefetch", "MFT", "YARA"],
+  "findings": [
+    {"source": "Prefetch", "matches": 1, "details": "Executed 5 times"},
+    {"source": "MFT", "matches": 1, "details": "Users\\Admin\\Downloads\\suspicious.exe"},
+    {"source": "YARA", "matches": 2, "details": ["Mimikatz_Memory_Rule", "HKTL_Mimikatz"]}
   ]
 }
 ```
@@ -417,7 +440,7 @@ Ingest the MFTECmd CSV at /cases/MFTECmd_output.csv and search for .exe files
 |------|-------------|
 | `investigate_execution` | Correlate Prefetch/Amcache/SRUM to prove binary execution |
 | `investigate_user_activity` | Correlate Browser/ShellBags/LNK/RecentDocs for user activity |
-| `hunt_ioc` | Hunt IOC (hash/filename/IP/domain) across all artifacts |
+| `hunt_ioc` | Hunt IOC (hash/filename/IP/domain) across all artifacts; `yara_scan=True` adds YARA threat intel |
 | `build_timeline` | Build unified timeline from multiple artifact sources |
 
 ### Execution Artifacts
@@ -699,6 +722,7 @@ All parsing is done with pure Python libraries:
 - **VirusTotal Integration**: Hash/IP/domain lookups with rate limiting and 24h caching
 - **PCAP Analysis**: Network forensics with conversation extraction, DNS/HTTP parsing, C2 detection
 - **DiE Integration**: Packer/compiler detection via Detect It Easy CLI
+- **hunt_ioc Enhancement**: Optional `yara_scan=True` parameter to scan found files with YARA rules
 - **New Tools**: `yara_scan_*`, `vt_lookup_*`, `pcap_*`, `die_*`
 - **Total Tools**: 46
 
