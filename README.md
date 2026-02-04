@@ -21,6 +21,16 @@ Traditional Windows forensics often requires:
 
 ---
 
+## Related Projects
+
+| Project | Focus | Link |
+|---------|-------|------|
+| **memoryforensics-mcp** | Memory dump analysis with Volatility3 - process anomalies, code injection, C2 connections, credential extraction | [GitHub](https://github.com/x746b/memoryforensics-mcp) |
+
+Use both together for complete incident response: disk artifacts with **winforensics-mcp**, memory analysis with **memoryforensics-mcp**.
+
+---
+
 ## Features
 
 ### Core Forensics
