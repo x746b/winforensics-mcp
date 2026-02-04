@@ -68,6 +68,21 @@ Only after orchestrators show HIGH confidence and you need specific details:
 | `file_analyze_pe` | Binary analysis (hashes, imports, exports, packers) |
 | `browser_get_history` | Detailed browser history with downloads |
 | `user_parse_shellbags` | Folder navigation with suspicious path detection |
+| `yara_scan_file` | Scan file for malware signatures (718 rules) |
+| `yara_scan_directory` | Batch scan directory for malware |
+| `vt_lookup_hash` | Get VirusTotal verdict for hash (MD5/SHA1/SHA256) |
+| `vt_lookup_ip` | Check IP reputation on VirusTotal |
+| `vt_lookup_domain` | Check domain reputation on VirusTotal |
+| `vt_lookup_file` | Hash file and look up on VirusTotal |
+| `pcap_get_stats` | PCAP overview - packet counts, protocols, top talkers |
+| `pcap_get_conversations` | Extract TCP/UDP flows |
+| `pcap_get_dns` | Extract DNS queries and responses |
+| `pcap_get_http` | Extract HTTP requests |
+| `pcap_search` | Search packet payloads for patterns |
+| `pcap_find_suspicious` | Detect C2 indicators, beaconing, DNS tunneling |
+| `die_analyze_file` | Detect packers, compilers, .NET (requires diec) |
+| `die_scan_directory` | Batch scan for packed executables |
+| `die_get_packer_info` | Get packer info (difficulty, unpack tools) |
 
 ## Example Investigation Scenarios:
 
@@ -104,6 +119,55 @@ hunt_ioc(
     ioc_type="auto"  # auto-detects IP, hash, domain, filename
 )
 # Returns: matches from browser history, EVTX, SRUM network data, etc.
+```
+
+### Scenario 4: Threat Intelligence Enrichment
+```
+# Get VirusTotal verdict for suspicious hash found in Amcache
+vt_lookup_hash(hash="abc123def456...")
+# Returns: detection ratio, verdict (malicious/suspicious/clean), threat names
+
+# Check C2 IP reputation
+vt_lookup_ip(ip="185.220.101.1")
+# Returns: malicious score, ASN, country, last analysis date
+
+# Verify downloaded file is malware
+vt_lookup_file(file_path="/evidence/Downloads/update.exe")
+# Returns: local hashes + VT verdict in one call
+```
+
+### Scenario 5: Network Traffic Analysis
+```
+# Quick overview of network capture
+pcap_get_stats(pcap_path="/evidence/capture.pcap")
+# Returns: packet counts, time range, protocols, top talkers
+
+# Find C2 indicators and beaconing
+pcap_find_suspicious(pcap_path="/evidence/capture.pcap")
+# Returns: suspicious ports, beaconing patterns, DNS tunneling, unusual user-agents
+
+# Extract DNS queries for IOC correlation
+pcap_get_dns(pcap_path="/evidence/capture.pcap", query_filter="evil")
+# Returns: DNS queries matching filter with response IPs
+
+# Search for specific C2 strings in traffic
+pcap_search(pcap_path="/evidence/capture.pcap", pattern="beacon")
+# Returns: packets containing the pattern with payload preview
+```
+
+### Scenario 6: Packer/Protector Analysis
+```
+# Check if malware is packed
+die_analyze_file(file_path="/evidence/malware.exe", deep_scan=True)
+# Returns: packer (UPX, Themida, etc.), compiler, is_packed flag
+
+# Scan directory for packed files
+die_scan_directory(dir_path="/evidence/Downloads")
+# Returns: list of packed files, compiler statistics
+
+# Get unpacking guidance
+die_get_packer_info(packer_name="Themida")
+# Returns: difficulty level, unpack tools, malware usage patterns
 ```
 
 ## Tips for Token Efficiency:

@@ -47,6 +47,26 @@ from .parsers import (
     parse_shellbags,
     find_suspicious_folders,
     ingest_csv,
+    yara_scan_file,
+    yara_scan_directory,
+    yara_list_rules,
+    YARA_AVAILABLE,
+    vt_lookup_hash,
+    vt_lookup_ip,
+    vt_lookup_domain,
+    vt_lookup_file,
+    VT_AVAILABLE,
+    get_pcap_stats,
+    pcap_get_conversations,
+    pcap_get_dns_queries,
+    pcap_get_http_requests,
+    search_pcap,
+    pcap_find_suspicious,
+    SCAPY_AVAILABLE,
+    die_analyze_file,
+    die_scan_directory,
+    die_get_packer_info,
+    DIE_AVAILABLE,
 )
 
 from .orchestrators import investigate_execution, build_timeline, hunt_ioc, investigate_user_activity
@@ -438,6 +458,405 @@ async def list_tools() -> list[Tool]:
                         },
                     },
                     "required": ["file_path"],
+                },
+            )
+        )
+
+    # YARA scanning tools (if yara-python available)
+    if YARA_AVAILABLE:
+        tools.append(
+            Tool(
+                name="yara_scan_file",
+                description="Scan a file with YARA rules for malware detection. Uses bundled signature-base rules by default (Mimikatz, CobaltStrike, webshells, ransomware, etc.).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to file to scan",
+                        },
+                        "rule_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Custom YARA rule paths (files or directories). Uses bundled rules if not specified.",
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "default": 60,
+                            "description": "Scan timeout in seconds",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="yara_scan_directory",
+                description="Scan directory for malware with YARA rules. Returns only files with matches. Uses bundled signature-base rules by default.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "directory": {
+                            "type": "string",
+                            "description": "Directory to scan",
+                        },
+                        "rule_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Custom YARA rule paths",
+                        },
+                        "file_pattern": {
+                            "type": "string",
+                            "default": "*",
+                            "description": "Glob pattern for files (e.g., '*.exe', '*.dll')",
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Search subdirectories",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum files to scan",
+                        },
+                    },
+                    "required": ["directory"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="yara_list_rules",
+                description="List available YARA rules. Shows bundled rules or custom rules from specified paths.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "rule_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Custom rule paths to list. Lists bundled rules if not specified.",
+                        },
+                    },
+                },
+            )
+        )
+
+    # VirusTotal tools (if vt-py available)
+    if VT_AVAILABLE:
+        tools.append(
+            Tool(
+                name="vt_lookup_hash",
+                description="Look up file hash (MD5/SHA1/SHA256) on VirusTotal for threat intelligence. "
+                           "Returns AV detections, threat names, verdict, and file metadata. "
+                           "Requires VIRUSTOTAL_API_KEY env var. Rate limited (15s between requests).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_hash": {
+                            "type": "string",
+                            "description": "MD5 (32 chars), SHA1 (40 chars), or SHA256 (64 chars) hash",
+                        },
+                    },
+                    "required": ["file_hash"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="vt_lookup_ip",
+                description="Look up IP address reputation on VirusTotal. "
+                           "Returns AV verdicts, ASN info, country, and reputation score. "
+                           "Requires VIRUSTOTAL_API_KEY env var.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "ip_address": {
+                            "type": "string",
+                            "description": "IPv4 or IPv6 address",
+                        },
+                    },
+                    "required": ["ip_address"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="vt_lookup_domain",
+                description="Look up domain reputation on VirusTotal. "
+                           "Returns AV verdicts, registrar, creation date, and categorizations. "
+                           "Requires VIRUSTOTAL_API_KEY env var.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "Domain name (e.g., 'evil.com')",
+                        },
+                    },
+                    "required": ["domain"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="vt_lookup_file",
+                description="Calculate file hash and look up on VirusTotal. "
+                           "Combines local hashing + VT lookup in one call. "
+                           "Requires VIRUSTOTAL_API_KEY env var.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to file to hash and look up",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+
+    # PCAP parsing tools (if scapy available)
+    if SCAPY_AVAILABLE:
+        tools.append(
+            Tool(
+                name="pcap_get_stats",
+                description="Get statistics from a PCAP/PCAPNG file including packet counts, "
+                           "time range, protocol distribution, top talkers, and top ports.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "max_packets": {
+                            "type": "integer",
+                            "default": 100000,
+                            "description": "Maximum packets to analyze (for large files)",
+                        },
+                    },
+                    "required": ["pcap_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="pcap_get_conversations",
+                description="Extract network conversations (TCP/UDP flows) from PCAP. "
+                           "Shows source/destination, ports, packet counts, bytes, and duration.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "protocol": {
+                            "type": "string",
+                            "enum": ["all", "tcp", "udp"],
+                            "default": "all",
+                            "description": "Filter by protocol",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum conversations to return",
+                        },
+                        "min_packets": {
+                            "type": "integer",
+                            "default": 1,
+                            "description": "Minimum packets for a conversation to be included",
+                        },
+                    },
+                    "required": ["pcap_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="pcap_get_dns",
+                description="Extract DNS queries and responses from PCAP. "
+                           "Shows query names, types, response IPs, and top queried domains.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum queries to return",
+                        },
+                        "query_filter": {
+                            "type": "string",
+                            "description": "Filter by domain name (substring match)",
+                        },
+                    },
+                    "required": ["pcap_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="pcap_get_http",
+                description="Extract HTTP requests from PCAP. "
+                           "Shows method, host, URI, user-agent, and content-type.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum requests to return",
+                        },
+                        "url_filter": {
+                            "type": "string",
+                            "description": "Filter by URL (substring match)",
+                        },
+                        "method_filter": {
+                            "type": "string",
+                            "description": "Filter by HTTP method (GET, POST, etc.)",
+                        },
+                    },
+                    "required": ["pcap_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="pcap_search",
+                description="Search for pattern in packet payloads. "
+                           "Supports string or regex search.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "String or regex pattern to search for",
+                        },
+                        "regex": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Treat pattern as regex",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum matches to return",
+                        },
+                    },
+                    "required": ["pcap_path", "pattern"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="pcap_find_suspicious",
+                description="Detect suspicious network activity in PCAP. "
+                           "Finds: suspicious ports (4444, etc.), beaconing patterns, "
+                           "DNS tunneling indicators, suspicious user-agents, large outbound transfers.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pcap_path": {
+                            "type": "string",
+                            "description": "Path to PCAP or PCAPNG file",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum findings per category",
+                        },
+                    },
+                    "required": ["pcap_path"],
+                },
+            )
+        )
+
+    # DiE (Detect It Easy) tools (if diec available)
+    if DIE_AVAILABLE:
+        tools.append(
+            Tool(
+                name="die_analyze_file",
+                description="Analyze file with Detect It Easy (DiE). "
+                           "Detects packers (UPX, Themida, VMProtect), compilers (MSVC, GCC), "
+                           ".NET, installers, and file types. Requires diec CLI.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to file to analyze",
+                        },
+                        "deep_scan": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable deep scan mode (slower but more thorough)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="die_scan_directory",
+                description="Scan directory for executables and analyze with DiE. "
+                           "Identifies packed files, compilers used, and provides summary statistics.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "dir_path": {
+                            "type": "string",
+                            "description": "Directory to scan",
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Scan subdirectories",
+                        },
+                        "deep_scan": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable deep scan mode",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum files to scan",
+                        },
+                    },
+                    "required": ["dir_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="die_get_packer_info",
+                description="Get information about a packer/protector including "
+                           "unpacking difficulty, tools, and common usage (legitimate vs malware).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "packer_name": {
+                            "type": "string",
+                            "description": "Packer name (e.g., 'UPX', 'Themida', 'VMProtect')",
+                        },
+                    },
+                    "required": ["packer_name"],
                 },
             )
         )
@@ -1243,6 +1662,206 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             check_signatures=args.get("check_signatures", True),
             detail_level=args.get("detail_level", "standard"),
         )
+        return json_response(result)
+
+    elif name == "yara_scan_file":
+        if not YARA_AVAILABLE:
+            return json_response({"error": "yara-python library not installed. Install with: pip install yara-python"})
+        result = yara_scan_file(
+            file_path=args["file_path"],
+            rule_paths=args.get("rule_paths"),
+            timeout=args.get("timeout", 60),
+        )
+        return json_response(result)
+
+    elif name == "yara_scan_directory":
+        if not YARA_AVAILABLE:
+            return json_response({"error": "yara-python library not installed. Install with: pip install yara-python"})
+        result = yara_scan_directory(
+            directory=args["directory"],
+            rule_paths=args.get("rule_paths"),
+            file_pattern=args.get("file_pattern", "*"),
+            recursive=args.get("recursive", True),
+            limit=args.get("limit", 100),
+        )
+        return json_response(result)
+
+    elif name == "yara_list_rules":
+        if not YARA_AVAILABLE:
+            return json_response({"error": "yara-python library not installed. Install with: pip install yara-python"})
+        result = yara_list_rules(
+            rule_paths=args.get("rule_paths"),
+        )
+        return json_response(result)
+
+    elif name == "vt_lookup_hash":
+        if not VT_AVAILABLE:
+            return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
+        try:
+            result = vt_lookup_hash(args["file_hash"])
+            return json_response(result)
+        except ValueError as e:
+            return json_response({"error": str(e)})
+        except RuntimeError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "vt_lookup_ip":
+        if not VT_AVAILABLE:
+            return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
+        try:
+            result = vt_lookup_ip(args["ip_address"])
+            return json_response(result)
+        except ValueError as e:
+            return json_response({"error": str(e)})
+        except RuntimeError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "vt_lookup_domain":
+        if not VT_AVAILABLE:
+            return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
+        try:
+            result = vt_lookup_domain(args["domain"])
+            return json_response(result)
+        except ValueError as e:
+            return json_response({"error": str(e)})
+        except RuntimeError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "vt_lookup_file":
+        if not VT_AVAILABLE:
+            return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
+        try:
+            result = vt_lookup_file(args["file_path"])
+            return json_response(result)
+        except ValueError as e:
+            return json_response({"error": str(e)})
+        except RuntimeError as e:
+            return json_response({"error": str(e)})
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    # PCAP parsing tools
+    elif name == "pcap_get_stats":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = get_pcap_stats(
+                pcap_path=args["pcap_path"],
+                max_packets=args.get("max_packets", 100000),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "pcap_get_conversations":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = pcap_get_conversations(
+                pcap_path=args["pcap_path"],
+                protocol=args.get("protocol", "all"),
+                limit=args.get("limit", 50),
+                min_packets=args.get("min_packets", 1),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "pcap_get_dns":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = pcap_get_dns_queries(
+                pcap_path=args["pcap_path"],
+                limit=args.get("limit", 100),
+                query_filter=args.get("query_filter"),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "pcap_get_http":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = pcap_get_http_requests(
+                pcap_path=args["pcap_path"],
+                limit=args.get("limit", 100),
+                url_filter=args.get("url_filter"),
+                method_filter=args.get("method_filter"),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "pcap_search":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = search_pcap(
+                pcap_path=args["pcap_path"],
+                pattern=args["pattern"],
+                regex=args.get("regex", False),
+                limit=args.get("limit", 50),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "pcap_find_suspicious":
+        if not SCAPY_AVAILABLE:
+            return json_response({"error": "scapy library not installed. Install with: pip install scapy"})
+        try:
+            result = pcap_find_suspicious(
+                pcap_path=args["pcap_path"],
+                limit=args.get("limit", 50),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+
+    # DiE (Detect It Easy) tools
+    elif name == "die_analyze_file":
+        if not DIE_AVAILABLE:
+            return json_response({
+                "error": "diec (Detect It Easy CLI) not found. Install from: "
+                        "https://github.com/horsicq/DIE-engine/releases"
+            })
+        try:
+            result = die_analyze_file(
+                file_path=args["file_path"],
+                deep_scan=args.get("deep_scan", False),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"DiE analysis failed: {e}"})
+
+    elif name == "die_scan_directory":
+        if not DIE_AVAILABLE:
+            return json_response({
+                "error": "diec (Detect It Easy CLI) not found. Install from: "
+                        "https://github.com/horsicq/DIE-engine/releases"
+            })
+        try:
+            result = die_scan_directory(
+                dir_path=args["dir_path"],
+                recursive=args.get("recursive", True),
+                deep_scan=args.get("deep_scan", False),
+                limit=args.get("limit", 100),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except ValueError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"DiE scan failed: {e}"})
+
+    elif name == "die_get_packer_info":
+        # This doesn't require diec to be installed
+        result = die_get_packer_info(args["packer_name"])
         return json_response(result)
 
     elif name == "disk_parse_prefetch":

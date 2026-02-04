@@ -160,6 +160,15 @@ class TestParserImports:
             query_amcache_csv,
         )
 
+    def test_yara_scanner_imports(self):
+        from winforensics_mcp.parsers import (
+            yara_scan_file,
+            yara_scan_directory,
+            yara_list_rules,
+            YARA_AVAILABLE,
+        )
+        assert isinstance(YARA_AVAILABLE, bool)
+
 
 class TestOrchestratorImports:
     """Test orchestrator module imports."""

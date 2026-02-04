@@ -94,6 +94,46 @@ from .csv_ingestor import (
     query_amcache_csv,
 )
 
+from .yara_scanner import (
+    scan_file as yara_scan_file,
+    scan_directory as yara_scan_directory,
+    scan_bytes as yara_scan_bytes,
+    compile_rules as yara_compile_rules,
+    list_rules as yara_list_rules,
+    get_default_rules_path as yara_get_default_rules_path,
+    YARA_AVAILABLE,
+)
+
+from .virustotal_client import (
+    lookup_hash as vt_lookup_hash,
+    lookup_ip as vt_lookup_ip,
+    lookup_domain as vt_lookup_domain,
+    lookup_file as vt_lookup_file,
+    get_api_key as vt_get_api_key,
+    clear_cache as vt_clear_cache,
+    get_cache_stats as vt_get_cache_stats,
+    VT_AVAILABLE,
+)
+
+from .pcap_parser import (
+    get_pcap_stats,
+    get_conversations as pcap_get_conversations,
+    get_dns_queries as pcap_get_dns_queries,
+    get_http_requests as pcap_get_http_requests,
+    search_pcap,
+    find_suspicious_connections as pcap_find_suspicious,
+    iter_packets as pcap_iter_packets,
+    SCAPY_AVAILABLE,
+)
+
+from .die_analyzer import (
+    analyze_file as die_analyze_file,
+    scan_directory as die_scan_directory,
+    get_packer_info as die_get_packer_info,
+    get_die_version,
+    DIE_AVAILABLE,
+)
+
 __all__ = [
     # EVTX
     "get_evtx_events",
@@ -167,4 +207,36 @@ __all__ = [
     "query_mftecmd_csv",
     "query_pecmd_csv",
     "query_amcache_csv",
+    # YARA Scanner
+    "yara_scan_file",
+    "yara_scan_directory",
+    "yara_scan_bytes",
+    "yara_compile_rules",
+    "yara_list_rules",
+    "yara_get_default_rules_path",
+    "YARA_AVAILABLE",
+    # VirusTotal
+    "vt_lookup_hash",
+    "vt_lookup_ip",
+    "vt_lookup_domain",
+    "vt_lookup_file",
+    "vt_get_api_key",
+    "vt_clear_cache",
+    "vt_get_cache_stats",
+    "VT_AVAILABLE",
+    # PCAP Parser
+    "get_pcap_stats",
+    "pcap_get_conversations",
+    "pcap_get_dns_queries",
+    "pcap_get_http_requests",
+    "search_pcap",
+    "pcap_find_suspicious",
+    "pcap_iter_packets",
+    "SCAPY_AVAILABLE",
+    # DiE Analyzer
+    "die_analyze_file",
+    "die_scan_directory",
+    "die_get_packer_info",
+    "get_die_version",
+    "DIE_AVAILABLE",
 ]

@@ -1,6 +1,6 @@
 [project]
 name = "winforensics-mcp"
-version = "0.3.1"
+version = "0.4.0"
 description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, PE analysis, and remote artifact collection for DFIR"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,10 +35,22 @@ remote = [
     "paramiko>=3.4.0",
     "smbprotocol>=1.12.0",
 ]
+yara = [
+    "yara-python>=4.3.0",
+]
+virustotal = [
+    "vt-py>=0.18.0",
+]
+pcap = [
+    "scapy>=2.5.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
+]
+all = [
+    "winforensics-mcp[remote,yara,virustotal,pcap]",
 ]
 
 [project.scripts]
@@ -50,6 +62,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["winforensics_mcp"]
+
+[tool.hatch.build.targets.wheel.sources]
+"winforensics_mcp" = "winforensics_mcp"
+
+[tool.hatch.build]
+include = [
+    "winforensics_mcp/**/*.py",
+    "winforensics_mcp/rules/*.yar",
+    "winforensics_mcp/rules/README.md",
+]
 
 [tool.ruff]
 line-length = 100

@@ -18,6 +18,7 @@ Traditional Windows forensics often requires:
 - **No Windows Required** - Analyze Windows disk images directly from your Linux forensics workstation
 - **No Wine/Mono Hacks** - Pure Python implementations using battle-tested open-source libraries
 - **AI-Assisted Analysis** - Integrates with Claude CLI and any MCP-compatible client for intelligent artifact correlation
+
 ---
 
 ## Features
@@ -51,6 +52,18 @@ Traditional Windows forensics often requires:
 | **LNK Files** | Windows shortcut analysis for recently accessed files |
 | **ShellBags** | Folder navigation history with suspicious path detection |
 | **RecentDocs** | Registry-based recent document tracking |
+
+### Network Forensics
+| Category | Capabilities |
+|----------|--------------|
+| **PCAP Analysis** | Parse PCAP/PCAPNG files - conversations, DNS queries, HTTP requests, suspicious connections |
+
+### Malware Detection
+| Category | Capabilities |
+|----------|--------------|
+| **YARA Scanning** | 718 rules from [signature-base](https://github.com/Neo23x0/signature-base) - APT, ransomware, webshells, hacktools |
+| **VirusTotal** | Hash/IP/domain reputation lookups with caching and rate limiting (free tier supported) |
+| **DiE Integration** | Detect packers (UPX, Themida, VMProtect), compilers, .NET, installers via Detect It Easy |
 
 ### Orchestrators
 | Tool | What It Does |
@@ -95,6 +108,18 @@ uv pip install -e .
 
 # For remote collection (WinRM, SSH, SMB):
 uv pip install -e ".[remote]"
+
+# For YARA malware scanning:
+uv pip install -e ".[yara]"
+
+# For VirusTotal threat intelligence:
+uv pip install -e ".[virustotal]"
+
+# For PCAP network analysis:
+uv pip install -e ".[pcap]"
+
+# Install everything:
+uv pip install -e ".[all]"
 ```
 
 ### Verify
@@ -264,6 +289,106 @@ Find timestomped files in the MFT at /mnt/evidence/$MFT
 }
 ```
 
+### Analyze Network Traffic
+
+```
+Analyze the PCAP file at /evidence/capture.pcap for suspicious activity
+```
+
+The `pcap_find_suspicious` tool detects C2 indicators, beaconing, and DNS tunneling:
+
+```json
+{
+  "total_findings": 5,
+  "findings": {
+    "suspicious_ports": [
+      {"src_ip": "192.168.1.100", "dst_ip": "185.220.101.1", "port": 4444, "reason": "Connection on suspicious port 4444"}
+    ],
+    "potential_beaconing": [
+      {"src_ip": "192.168.1.100", "dst_ip": "10.10.10.10", "connection_count": 48, "avg_interval_seconds": 60.2}
+    ],
+    "dns_tunneling_indicators": [
+      {"query": "aGVsbG8gd29ybGQ.evil.com", "reason": "Unusually long DNS label (45 chars)"}
+    ]
+  }
+}
+```
+
+### Detect Packers with DiE
+
+```
+Check if malware.exe is packed using DiE
+```
+
+The `die_analyze_file` tool detects packers, compilers, and protectors:
+
+```json
+{
+  "file": "/evidence/malware.exe",
+  "file_type": "PE32",
+  "arch": "x86",
+  "detects": [
+    {"type": "Packer", "name": "UPX", "version": "3.96"},
+    {"type": "Compiler", "name": "MSVC", "version": "14.0"}
+  ],
+  "is_packed": true,
+  "is_dotnet": false
+}
+```
+
+### Look Up Hash on VirusTotal
+
+```
+Look up this hash on VirusTotal: d41d8cd98f00b204e9800998ecf8427e
+```
+
+```json
+{
+  "hash": "d41d8cd98f00b204e9800998ecf8427e",
+  "hash_type": "md5",
+  "found": true,
+  "verdict": "malicious",
+  "detection_ratio": "45/72",
+  "popular_threat_names": ["Trojan.GenericKD", "Win32/Trojan"],
+  "file_type": "Win32 EXE",
+  "first_submission": "2024-01-15T10:00:00Z"
+}
+```
+
+### Scan for Malware with YARA
+
+```
+Scan /mnt/evidence/Users/Admin/Downloads for malware
+```
+
+The `yara_scan_directory` tool uses 718 rules from signature-base:
+
+```json
+{
+  "directory": "/mnt/evidence/Users/Admin/Downloads",
+  "files_scanned": 47,
+  "files_matched": 2,
+  "matches": [
+    {
+      "file": "mimikatz.exe",
+      "match_count": 3,
+      "matches": [
+        {"rule": "Mimikatz_Memory_Rule_1", "namespace": "gen_mimikatz"},
+        {"rule": "mimikatz", "namespace": "gen_mimikatz"},
+        {"rule": "HKTL_Mimikatz", "namespace": "thor-hacktools"}
+      ]
+    },
+    {
+      "file": "beacon.dll",
+      "match_count": 1,
+      "matches": [
+        {"rule": "CobaltStrike_Beacon", "namespace": "apt_cobaltstrike"}
+      ]
+    }
+  ]
+}
+```
+
 ### Import Eric Zimmerman CSV Output
 
 Already ran MFTECmd on Windows? Import the CSV:
@@ -303,6 +428,42 @@ Ingest the MFTECmd CSV at /cases/MFTECmd_output.csv and search for .exe files
 | `disk_parse_prefetch` | Parse Prefetch for execution evidence |
 | `disk_parse_amcache` | Parse Amcache.hve for SHA1 hashes and timestamps |
 | `disk_parse_srum` | Parse SRUDB.dat for app resource and network usage |
+
+### Malware Detection (YARA)
+
+| Tool | Description |
+|------|-------------|
+| `yara_scan_file` | Scan file with 718 YARA rules (Mimikatz, CobaltStrike, webshells, APT, ransomware) |
+| `yara_scan_directory` | Batch scan directory for malware |
+| `yara_list_rules` | List available/bundled YARA rules |
+
+### Threat Intelligence (VirusTotal)
+
+| Tool | Description |
+|------|-------------|
+| `vt_lookup_hash` | Look up file hash (MD5/SHA1/SHA256) on VirusTotal |
+| `vt_lookup_ip` | Get IP address reputation and geolocation |
+| `vt_lookup_domain` | Get domain reputation and categorization |
+| `vt_lookup_file` | Calculate file hashes and look up on VirusTotal |
+
+### Network Forensics (PCAP)
+
+| Tool | Description |
+|------|-------------|
+| `pcap_get_stats` | Get PCAP statistics - packet counts, protocols, top talkers |
+| `pcap_get_conversations` | Extract TCP/UDP conversations with byte counts |
+| `pcap_get_dns` | Extract DNS queries and responses |
+| `pcap_get_http` | Extract HTTP requests with URLs, methods, user-agents |
+| `pcap_search` | Search packet payloads for strings or regex patterns |
+| `pcap_find_suspicious` | Detect C2 indicators, beaconing, DNS tunneling |
+
+### Packer Detection (DiE)
+
+| Tool | Description |
+|------|-------------|
+| `die_analyze_file` | Analyze file for packers, compilers, protectors, .NET |
+| `die_scan_directory` | Batch scan directory for packed executables |
+| `die_get_packer_info` | Get info about packer (difficulty, unpack tools) |
 
 ### File System
 
@@ -397,9 +558,39 @@ Build a timeline for /mnt/evidence filtering for 'mimikatz'
 Check persistence mechanisms in the SYSTEM and SOFTWARE hives
 ```
 
+### 7. Malware Analysis
+
+```
+Scan the Downloads folder for malware with YARA
+```
+
+### 8. Threat Intelligence
+
+```
+Look up suspicious hashes on VirusTotal
+Check if this C2 IP is known malicious: 185.220.101.1
+```
+
 ---
 
 ## Configuration
+
+### VirusTotal API Key
+
+For threat intelligence lookups, configure your VirusTotal API key:
+
+```bash
+# Option 1: Environment variable
+export VIRUSTOTAL_API_KEY="your-api-key-here"
+
+# Option 2: Config file
+mkdir -p ~/.config/winforensics-mcp
+echo "your-api-key-here" > ~/.config/winforensics-mcp/vt_api_key
+```
+
+Get your free API key at [virustotal.com](https://www.virustotal.com/gui/join-us).
+
+**Note:** Free tier is rate-limited to 4 requests/minute. The client automatically handles rate limiting and caches results for 24 hours.
 
 ### Adjusting Response Limits
 
@@ -423,6 +614,39 @@ MAX_USN_RESULTS = 30        # USN Journal records
 
 ```bash
 uv pip install pefile libscca-python libesedb-python mft pylnk3
+
+# For YARA scanning
+uv pip install yara-python
+
+# For VirusTotal lookups
+uv pip install vt-py
+```
+
+### VirusTotal API errors
+
+If you see "API key not configured":
+```bash
+# Check if key is set
+echo $VIRUSTOTAL_API_KEY
+
+# Or create config file
+mkdir -p ~/.config/winforensics-mcp
+echo "your-key" > ~/.config/winforensics-mcp/vt_api_key
+```
+
+If you see rate limit errors, wait 15 seconds between requests (automatic) or use cached results.
+
+### DiE (Detect It Easy) not found
+
+Install `diec` (command-line version):
+
+```bash
+# Debian/Ubuntu
+sudo apt install detect-it-easy
+
+# Or download from GitHub
+# https://github.com/horsicq/DIE-engine/releases
+# Extract and add to PATH
 ```
 
 ### Permission denied on registry hives
@@ -450,6 +674,39 @@ All parsing is done with pure Python libraries:
 | [libesedb-python](https://github.com/libyal/libesedb) | ESE database (SRUM) parsing |
 | [mft](https://github.com/omerbenamram/mft) | MFT parsing (Rust-based, Python bindings) |
 | [pylnk3](https://github.com/strayge/pylnk) | LNK file parsing |
+| [yara-python](https://github.com/VirusTotal/yara-python) | YARA rule scanning (optional) |
+| [vt-py](https://github.com/VirusTotal/vt-py) | VirusTotal API client (optional) |
+| [scapy](https://github.com/secdev/scapy) | PCAP/PCAPNG parsing (optional) |
+
+### Bundled YARA Rules
+
+718 rules from [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) are included:
+
+| Category | Examples |
+|----------|----------|
+| APT | Lazarus, APT28, APT29, Turla, Sofacy, CobaltStrike |
+| Crimeware | Emotet, TrickBot, Ransomware families |
+| Generic | Mimikatz, webshells, PowerShell obfuscation |
+| Exploits | Log4Shell, ProxyShell, PrintNightmare |
+| Hacktools | BruteRatel, Empire, Metasploit payloads |
+
+---
+
+## Changelog
+
+### v0.4.0 - Threat Intel & Network Edition
+- **YARA Scanning**: 718 bundled rules from signature-base (APT, ransomware, hacktools, webshells)
+- **VirusTotal Integration**: Hash/IP/domain lookups with rate limiting and 24h caching
+- **PCAP Analysis**: Network forensics with conversation extraction, DNS/HTTP parsing, C2 detection
+- **DiE Integration**: Packer/compiler detection via Detect It Easy CLI
+- **New Tools**: `yara_scan_*`, `vt_lookup_*`, `pcap_*`, `die_*`
+- **Total Tools**: 46
+
+### v0.3.x
+- Core forensics: EVTX, Registry, PE analysis, Prefetch, Amcache, SRUM
+- File system: MFT parsing with timestomping detection, USN Journal
+- User activity: Browser history, LNK files, ShellBags
+- Orchestrators: `investigate_execution`, `investigate_user_activity`, `hunt_ioc`, `build_timeline`
 
 ---
 
