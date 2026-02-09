@@ -25,7 +25,7 @@ Traditional Windows forensics often requires:
 
 | Project | Focus | Link |
 |---------|-------|------|
-| **memoryforensics-mcp** | Memory dump analysis with Volatility3 - process anomalies, code injection, C2 connections, credential extraction | [GitHub](https://github.com/x746b/memoryforensics-mcp) |
+| **mem_forensics-mcp** | Unified Memory Forensics MCP Server - Multi-tier engine combining Rust speed with Vol3 coverage. | [GitHub](https://github.com/x746b/mem_forensics-mcp) |
 | **mac_forensics-mcp** | macOS DFIR - Unified Logs, FSEvents, Spotlight, Plists, SQLite databases, Extended Attributes | [GitHub](https://github.com/x746b/mac_forensics-mcp) |
 
 Use together for complete incident response across platforms.
