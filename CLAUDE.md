@@ -84,6 +84,13 @@ Only after orchestrators show HIGH confidence and you need specific details:
 | `die_analyze_file` | Detect packers, compilers, .NET (requires diec) |
 | `die_scan_directory` | Batch scan for packed executables |
 | `die_get_packer_info` | Get packer info (difficulty, unpack tools) |
+| `api_analyze_imports` | Full PE import analysis with pattern detection + MITRE ATT&CK mapping |
+| `api_detect_patterns` | Detect injection/evasion/persistence patterns from PE imports |
+| `api_lookup` | Look up any Windows API signature, params, DLL, category (26,944 APIs) |
+| `api_search_category` | Browse APIs by category (e.g., "File Management", "Process Injection") |
+| `apmx_parse` | Parse API Monitor capture (.apmx64/.apmx86) — process info, modules, call count |
+| `apmx_get_calls` | Extract API calls from APMX capture with filtering and pagination |
+| `apmx_detect_patterns` | Detect attack patterns in captured API call sequences with MITRE ATT&CK IDs |
 
 ## Example Investigation Scenarios:
 
@@ -164,7 +171,32 @@ pcap_search(pcap_path="/evidence/capture.pcap", pattern="beacon")
 # Returns: packets containing the pattern with payload preview
 ```
 
-### Scenario 6: Packer/Protector Analysis
+### Scenario 6: API Import Analysis & Pattern Detection
+```
+# Deep import analysis with MITRE ATT&CK pattern detection
+api_analyze_imports(file_path="/evidence/malware.exe")
+# Returns: all imports, detected attack patterns (injection, evasion, persistence),
+#          risk level, MITRE technique IDs (T1055, T1134, T1547, etc.)
+
+# Quick pattern-only check (just the attack patterns, no full import list)
+api_detect_patterns(file_path="/evidence/malware.exe")
+# Returns: matched patterns with risk level and MITRE IDs
+
+# Look up a specific Windows API signature
+api_lookup(api_name="CreateRemoteThread")
+# Returns: module (Kernel32.dll), category, calling convention, return type, parameters
+
+# Wildcard search for API families
+api_lookup(api_name="NtCreate*")
+# Returns: all matching APIs across all DLLs
+
+# Browse APIs by category
+api_search_category(category="Process Injection")
+api_search_category(category="File Management")
+# Returns: APIs in that category with module info + category tree
+```
+
+### Scenario 7: Packer/Protector Analysis
 ```
 # Check if malware is packed
 die_analyze_file(file_path="/evidence/malware.exe", deep_scan=True)
@@ -177,6 +209,22 @@ die_scan_directory(dir_path="/evidence/Downloads")
 # Get unpacking guidance
 die_get_packer_info(packer_name="Themida")
 # Returns: difficulty level, unpack tools, malware usage patterns
+```
+
+### Scenario 8: API Monitor Capture Analysis (APMX)
+```
+# Parse capture file — get process info, modules, call count
+apmx_parse(file_path="/evidence/capture.apmx64")
+# Returns: process name/PID/path, loaded DLLs, total API call count
+
+# Extract specific API calls with filtering
+apmx_get_calls(file_path="/evidence/capture.apmx64", api_filter="VirtualAlloc", limit=50)
+# Returns: matching call records with call index and nested calls
+
+# Detect injection/evasion patterns in captured runtime behavior
+apmx_detect_patterns(file_path="/evidence/capture.apmx64")
+# Returns: matched patterns (classic injection, process hollowing, etc.),
+#          MITRE ATT&CK IDs, risk level, suspicious call timeline with record indices
 ```
 
 ## Tips for Token Efficiency:

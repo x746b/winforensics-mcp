@@ -1,0 +1,12 @@
+==> Open the 'inject.exe.i64' file using IDA Freeware.
+
+==> Instructions for API Monitor
+We are well-acquainted with opening PCAP and .EVTX files, but what are .apmx64 and .apmx86 files ? These are file extensions associated with API Monitor, a software used to monitor and control API calls made by applications and services. To commence your analysis, follow the steps provided below:
+
+- Download the [API Monitor](http://www.rohitab.com/apimonitor)
+
+- Navigate to "Files" and click on "Open" to view captured data from the file: "DC.apmx86" or "WKSTN1.apmx64"
+
+- After opening the file, the "Monitoring Process" window will populate with a list of processes. Expand the view by clicking the '+' symbol to reveal the modules and threads associated with each process.
+
+- The API calls can be observed in the "Summary" window. To focus our analysis on a specific module, click on the different DLLs loaded by the processes.

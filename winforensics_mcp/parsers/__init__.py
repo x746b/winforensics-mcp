@@ -134,6 +134,23 @@ from .die_analyzer import (
     DIE_AVAILABLE,
 )
 
+from .api_monitor import (
+    build_api_database,
+    lookup_api,
+    search_api_by_category,
+    get_api_stats,
+    get_module_apis,
+    detect_api_patterns,
+    analyze_pe_imports_detailed,
+    parse_apmx,
+    get_apmx_calls,
+    get_apmx_api_stats,
+    detect_apmx_patterns,
+    get_apmx_call_details,
+    correlate_apmx_handles,
+    API_DB_AVAILABLE,
+)
+
 __all__ = [
     # EVTX
     "get_evtx_events",
@@ -239,4 +256,19 @@ __all__ = [
     "die_get_packer_info",
     "get_die_version",
     "DIE_AVAILABLE",
+    # API Monitor
+    "build_api_database",
+    "lookup_api",
+    "search_api_by_category",
+    "get_api_stats",
+    "get_module_apis",
+    "detect_api_patterns",
+    "analyze_pe_imports_detailed",
+    "parse_apmx",
+    "get_apmx_calls",
+    "get_apmx_api_stats",
+    "detect_apmx_patterns",
+    "get_apmx_call_details",
+    "correlate_apmx_handles",
+    "API_DB_AVAILABLE",
 ]

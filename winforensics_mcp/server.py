@@ -67,6 +67,20 @@ from .parsers import (
     die_scan_directory,
     die_get_packer_info,
     DIE_AVAILABLE,
+    build_api_database,
+    lookup_api,
+    search_api_by_category,
+    get_api_stats,
+    get_module_apis,
+    detect_api_patterns,
+    analyze_pe_imports_detailed,
+    parse_apmx,
+    get_apmx_calls,
+    get_apmx_api_stats,
+    detect_apmx_patterns,
+    get_apmx_call_details,
+    correlate_apmx_handles,
+    API_DB_AVAILABLE,
 )
 
 from .orchestrators import investigate_execution, build_timeline, hunt_ioc, investigate_user_activity
@@ -857,6 +871,256 @@ async def list_tools() -> list[Tool]:
                         },
                     },
                     "required": ["packer_name"],
+                },
+            )
+        )
+
+    # API Monitor tools (API knowledge base, import analysis, pattern detection)
+    if API_DB_AVAILABLE:
+        tools.append(
+            Tool(
+                name="api_analyze_imports",
+                description="Detailed PE import analysis with pattern detection and API enrichment. "
+                           "Extracts all imports, detects injection/evasion/persistence patterns with "
+                           "MITRE ATT&CK mapping, and optionally enriches with API definitions.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to PE file to analyze",
+                        },
+                        "detect_patterns": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Run pattern detection against import table",
+                        },
+                        "enrich_from_db": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Add API definitions from knowledge base (requires built DB)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="api_lookup",
+                description="Look up Windows API definition (signature, params, DLL, category) "
+                           "from the API Monitor knowledge base. Supports wildcards (e.g., 'Create*').",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "api_name": {
+                            "type": "string",
+                            "description": "API name or pattern (e.g., 'CreateFileW', 'NtCreate*')",
+                        },
+                        "include_params": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Include parameter details in results",
+                        },
+                    },
+                    "required": ["api_name"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="api_search_category",
+                description="Browse/search Windows APIs by category. Categories are hierarchical "
+                           "(e.g., 'Data Access and Storage/Local File Systems/File Management').",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "description": "Category path or substring to search",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum results to return",
+                        },
+                    },
+                    "required": ["category"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="api_detect_patterns",
+                description="Detect injection/evasion/persistence API patterns from PE imports. "
+                           "Returns matched patterns with MITRE ATT&CK technique IDs and risk levels.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to PE file to analyze",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+
+        # APMX capture file tools
+        tools.append(
+            Tool(
+                name="apmx_parse",
+                description="Parse Rohitab API Monitor capture file (.apmx64/.apmx86). "
+                           "Returns process info (name, PID, path, command line), loaded modules, "
+                           "and API call count. Use this first to understand what's in a capture.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="apmx_get_calls",
+                description="Extract API call records from an APMX capture with filtering and pagination. "
+                           "Each record shows the top-level API and any nested calls made within it.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to read (0 = first/only process)",
+                        },
+                        "api_filter": {
+                            "type": "string",
+                            "description": "Filter by API name substring (case-insensitive)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 500,
+                            "description": "Maximum number of call records to return",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Skip first N matching records (for pagination)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="apmx_detect_patterns",
+                description="Detect injection/evasion/persistence patterns in APMX captured API calls. "
+                           "Analyzes runtime behavior (actually-called APIs) against known attack patterns "
+                           "with MITRE ATT&CK technique IDs. Returns risk level and suspicious call timeline.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to analyze (0 = first/only process)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+
+        tools.append(
+            Tool(
+                name="apmx_get_call_details",
+                description="Extract detailed API call records with parameter values, return values, "
+                           "and timestamps from an APMX capture. Shows pre-call and post-call parameter "
+                           "values, identifies return values by comparing pre/post state, and extracts "
+                           "embedded strings. Use call_indices for specific records or api_filter to search.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to read (0 = first/only process)",
+                        },
+                        "call_indices": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Specific record indices to retrieve (overrides filter/pagination)",
+                        },
+                        "api_filter": {
+                            "type": "string",
+                            "description": "Filter by API name substring (case-insensitive)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum number of detailed records to return",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Skip first N matching records (for pagination)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="apmx_correlate_handles",
+                description="Track handle values across API calls to reconstruct operation chains. "
+                           "Identifies handle-producing APIs (OpenProcess, CreateFile, etc.) and traces "
+                           "where those handles are consumed (VirtualAllocEx, WriteProcessMemory, etc.). "
+                           "Reveals attack chains like: OpenProcess -> VirtualAllocEx -> WriteProcessMemory "
+                           "-> CreateRemoteThread.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to analyze (0 = first/only process)",
+                        },
+                        "target_apis": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Limit to specific APIs (default: common injection/evasion APIs)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Maximum number of handle chains to return",
+                        },
+                    },
+                    "required": ["file_path"],
                 },
             )
         )
@@ -1868,6 +2132,136 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         # This doesn't require diec to be installed
         result = die_get_packer_info(args["packer_name"])
         return json_response(result)
+
+    elif name == "api_analyze_imports":
+        db_path = Path(__file__).parent / "data" / "api_definitions.db"
+        enrich = args.get("enrich_from_db", False)
+        try:
+            result = analyze_pe_imports_detailed(
+                file_path=args["file_path"],
+                db_path=str(db_path) if enrich and db_path.exists() else None,
+            )
+            if not args.get("detect_patterns", True) and "patterns" in result:
+                del result["patterns"]
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"Import analysis failed: {e}"})
+
+    elif name == "api_lookup":
+        db_path = Path(__file__).parent / "data" / "api_definitions.db"
+        if not db_path.exists():
+            return json_response({
+                "error": f"API database not found at {db_path}. "
+                        "Build it first by providing XML dir path to build_api_database()."
+            })
+        try:
+            result = lookup_api(
+                db_path=str(db_path),
+                api_name=args["api_name"],
+                include_params=args.get("include_params", True),
+            )
+            return json_response(result)
+        except Exception as e:
+            return json_response({"error": f"API lookup failed: {e}"})
+
+    elif name == "api_search_category":
+        db_path = Path(__file__).parent / "data" / "api_definitions.db"
+        if not db_path.exists():
+            return json_response({
+                "error": f"API database not found at {db_path}. "
+                        "Build it first by providing XML dir path to build_api_database()."
+            })
+        try:
+            result = search_api_by_category(
+                db_path=str(db_path),
+                category=args["category"],
+                limit=args.get("limit", 50),
+            )
+            return json_response(result)
+        except Exception as e:
+            return json_response({"error": f"Category search failed: {e}"})
+
+    elif name == "api_detect_patterns":
+        try:
+            result = analyze_pe_imports_detailed(file_path=args["file_path"])
+            # Return only the patterns portion
+            if "patterns" in result:
+                return json_response(result["patterns"])
+            elif "error" in result:
+                return json_response(result)
+            return json_response({"patterns_detected": 0, "risk_level": "none", "details": []})
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"Pattern detection failed: {e}"})
+
+    elif name == "apmx_parse":
+        try:
+            result = parse_apmx(file_path=args["file_path"])
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX parse failed: {e}"})
+
+    elif name == "apmx_get_calls":
+        try:
+            result = get_apmx_calls(
+                file_path=args["file_path"],
+                process_index=args.get("process_index", 0),
+                api_filter=args.get("api_filter"),
+                limit=args.get("limit", 500),
+                offset=args.get("offset", 0),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX call extraction failed: {e}"})
+
+    elif name == "apmx_detect_patterns":
+        try:
+            result = detect_apmx_patterns(
+                file_path=args["file_path"],
+                process_index=args.get("process_index", 0),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX pattern detection failed: {e}"})
+
+    elif name == "apmx_get_call_details":
+        try:
+            result = get_apmx_call_details(
+                file_path=args["file_path"],
+                process_index=args.get("process_index", 0),
+                call_indices=args.get("call_indices"),
+                api_filter=args.get("api_filter"),
+                limit=args.get("limit", 50),
+                offset=args.get("offset", 0),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX call details failed: {e}"})
+
+    elif name == "apmx_correlate_handles":
+        try:
+            result = correlate_apmx_handles(
+                file_path=args["file_path"],
+                process_index=args.get("process_index", 0),
+                target_apis=args.get("target_apis"),
+                limit=args.get("limit", 100),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX handle correlation failed: {e}"})
 
     elif name == "disk_parse_prefetch":
         if not PYSCCA_AVAILABLE:
