@@ -46,3 +46,7 @@ Thumbs.db
 # Project specific
 *.tar.gz
 *.evtx
+
+# SQLite WAL/SHM files
+*.db-shm
+*.db-wal
