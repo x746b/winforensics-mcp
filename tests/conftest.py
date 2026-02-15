@@ -1,16 +1,6 @@
 """Shared pytest fixtures and CLI options for APMX tests.
 
-Usage examples:
-    # Structural tests only (any capture works):
-    pytest tests/ --apmx-file tests/data/Ghost-Thread.apmx64
-
-    # With expected answers for regression validation:
-    pytest tests/ --apmx-file tests/data/Ghost-Thread.apmx64 \
-        --expected-pid 16224 \
-        --expected-shellcode-size 511 \
-        --expected-technique "Thread Local Storage"
-
-    # Without --apmx-file: auto-discovers captures under tests/
+Supports --apmx-file and --expected-* options for parameterized integration tests.
 """
 from __future__ import annotations
 
@@ -78,7 +68,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def _autodiscover_apmx() -> Path | None:
-    """Fall back: find any APMX capture under tests/."""
     tests_root = Path(__file__).resolve().parent
     for ext in ("*.apmx64", "*.apmx86"):
         files = sorted(tests_root.rglob(ext))
@@ -101,7 +90,6 @@ def apmx_file(request: pytest.FixtureRequest) -> Path | None:
 
 @pytest.fixture(scope="session")
 def expected_answers(request: pytest.FixtureRequest) -> dict:
-    """Collect all --expected-* options into a dict."""
     return {
         "pid": request.config.getoption("--expected-pid"),
         "shellcode_size": request.config.getoption("--expected-shellcode-size"),

@@ -59,7 +59,6 @@ def _open_apmx_zip(file_path: str | Path) -> zipfile.ZipFile:
 
 
 def _read_utf16le_string(data: bytes, offset: int) -> tuple[str, int]:
-    """Read a length-prefixed UTF-16LE string. Returns (string, new_offset)."""
     if offset + 4 > len(data):
         return "", offset
     char_count = struct.unpack_from("<I", data, offset)[0]
@@ -72,11 +71,7 @@ def _read_utf16le_string(data: bytes, offset: int) -> tuple[str, int]:
 
 
 def _extract_api_names(record: bytes) -> list[str]:
-    """Extract API function names from a binary call record.
-
-    Names are encoded as: 01 00 <length_byte> 00 <ascii_name> 00
-    The first name is the top-level API, subsequent names are nested calls.
-    """
+    # Names encoded as: 01 00 <len> 00 <ascii> 00
     names: list[str] = []
     i = 0
     end = len(record) - 4
@@ -101,11 +96,7 @@ def _extract_api_names(record: bytes) -> list[str]:
 
 
 def _resolve_name_from_defs(defs_blob: bytes, code_addr: int) -> str | None:
-    """Resolve an API name from the definitions blob using code_addr.
-
-    Each definition entry has a name pointer at offset +0x18 (uint64) that
-    points to a null-terminated ASCII string in the definitions string pool.
-    """
+    """Resolve an API name from the definitions blob using code_addr."""
     if code_addr + 0x20 > len(defs_blob):
         return None
     name_ptr = struct.unpack_from("<Q", defs_blob, code_addr + 0x18)[0]
@@ -129,18 +120,13 @@ def _get_record_api_name(
     rec_offset: int,
     defs_blob: bytes | None,
 ) -> str:
-    """Get the API name for a record.
-
-    Prefers embedded names (higher-level Win32 APIs like OpenProcess) when
-    available, falls back to definitions-resolved names (lower-level native
-    APIs like NtOpenProcess).
-    """
-    # Primary: embedded names from sec4 (higher-level, more forensically useful)
+    """Get the API name for a record, preferring embedded over definitions-resolved names."""
+    # Prefer embedded names
     names = _extract_api_names(rec)
     if names:
         return names[0]
 
-    # Fallback: resolve from definitions blob via code_addr at +0x28
+    # Fall back to definitions
     if defs_blob is not None and len(rec) >= 0x30:
         code_addr = struct.unpack_from("<Q", rec, 0x28)[0]
         name = _resolve_name_from_defs(defs_blob, code_addr)
@@ -150,7 +136,6 @@ def _get_record_api_name(
     return ""
 
 
-# Windows FILETIME epoch: Jan 1, 1601
 _FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 _FILETIME_TICKS_PER_SEC = 10_000_000
 
@@ -168,14 +153,9 @@ def _filetime_to_iso(filetime: int) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Named parameter mappings for common APIs (Step 3)
+# Named parameter mappings for common APIs
 # ---------------------------------------------------------------------------
 
-# Maps API names to ordered parameter name lists.  Index 0 in the APMX
-# parameter block is the *return value* (for APIs with output params at
-# position 0).  The names here correspond to the positional params as
-# they appear in the binary block — *not* the MSDN signature, because
-# the APMX format prepends a return-value slot.
 COMMON_API_PARAMS: dict[str, list[str]] = {
     "CreateToolhelp32Snapshot": ["dwFlags", "th32ProcessID"],
     "Process32FirstW": ["hSnapshot", "lppe"],
@@ -292,7 +272,6 @@ def _decode_flags(value: int, flag_table: dict[int, str]) -> str:
     """Decode a bitmask value into symbolic flag names."""
     if not isinstance(value, int) or value < 0:
         return ""
-    # Check for exact match first (e.g., PROCESS_ALL_ACCESS)
     if value in flag_table:
         return flag_table[value]
     parts = []
@@ -310,26 +289,11 @@ def _decode_flags(value: int, flag_table: dict[int, str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Toolhelp structure decoding (Step 4)
+# Toolhelp structure decoding
 # ---------------------------------------------------------------------------
 
 def _decode_processentry32w(param_data: dict) -> dict[str, Any] | None:
-    """Decode a PROCESSENTRY32W structure from a parameter's uint64 slot values.
-
-    PROCESSENTRY32W layout (total 568 bytes = 71 uint64 slots):
-      dwSize:              4 bytes  (offset 0)
-      cntUsage:            4 bytes  (offset 4)
-      th32ProcessID:       4 bytes  (offset 8)
-      th32DefaultHeapID:   8 bytes  (offset 12)
-      th32ModuleID:        4 bytes  (offset 20)
-      cntThreads:          4 bytes  (offset 24)
-      th32ParentProcessID: 4 bytes  (offset 28)
-      pcPriClassBase:      4 bytes  (offset 32)
-      dwFlags:             4 bytes  (offset 36)
-      szExeFile:           260*2=520 bytes (offset 40, WCHAR[MAX_PATH])
-
-    We reconstruct the raw bytes from the uint64 slot values, then extract fields.
-    """
+    """Decode PROCESSENTRY32W from uint64 slot values."""
     slots = param_data.get("values", [])
     if len(slots) < 8:
         return None
@@ -386,13 +350,7 @@ def _decode_processentry32w(param_data: dict) -> dict[str, Any] | None:
 def _parse_param_values(
     param_block: bytes, count: int, size_field: int
 ) -> list[dict[str, Any]]:
-    """Parse parameter values from a pre-call or post-call data block.
-
-    Returns a list of dicts, one per parameter, containing:
-      - slot_count: number of uint64 entries used by this param
-      - values: list of uint64 values (raw)
-      - value: the "primary" value (last entry for multi-slot, only for single)
-    """
+    """Parse parameter values from a pre-call or post-call data block."""
     params: list[dict[str, Any]] = []
     data_offset = size_field  # values start after descriptor
     available = len(param_block) - data_offset
@@ -566,9 +524,7 @@ def _parse_call_record(
 
         result["param_count"] = count
 
-        # Format v8 (e.g. powershell.exe in newer captures) packs params
-        # into 2 large groups with 7-10 slots each rather than individual
-        # params.  Flag this so consumers know param values are grouped.
+        # Format v8 packs params into 2 large groups; flag as "grouped"
         if fmt_version >= 8 and count <= 2:
             total_slots = 0
             for p in range(count):
@@ -639,10 +595,7 @@ def _parse_call_record(
 
             params_out.append(pinfo)
 
-        # Attach named parameters if we have a mapping for this API (Step 3)
-        # The APMX format may insert an extra "return value" slot (marked with
-        # is_return=True) that doesn't correspond to any MSDN parameter.
-        # We assign names only to non-return slots.
+        # Skip return-value slots when assigning names
         api_for_naming = result.get("api_name") or ""
         param_names = COMMON_API_PARAMS.get(api_for_naming)
         if param_names:
@@ -671,7 +624,6 @@ def _parse_call_record(
                     if decoded_str:
                         p["decoded_value"] = decoded_str
 
-        # Decode Toolhelp output structures (Step 4)
         if api_for_naming in ("Process32FirstW", "Process32NextW", "Process32First", "Process32Next"):
             # The second actual parameter (lppe) contains the PROCESSENTRY32W struct.
             # In the param block it's typically at index 1 or 2 depending on return slot.
@@ -693,7 +645,6 @@ def _parse_call_record(
 
 
 def _parse_process_info(data: bytes) -> dict[str, Any]:
-    """Parse the process/N/info binary blob."""
     info: dict[str, Any] = {}
     offset = 0
 
@@ -751,7 +702,6 @@ def _parse_process_info(data: bytes) -> dict[str, Any]:
 
 
 def _parse_monitoring_log(data: bytes) -> list[dict[str, str]]:
-    """Parse the monitoring log (UTF-16LE text)."""
     try:
         text = data.decode("utf-16-le", errors="replace")
     except Exception:
@@ -1447,7 +1397,7 @@ def correlate_apmx_handles(
 
 
 # ---------------------------------------------------------------------------
-# Step 5: Injection chain extraction (higher-level wrapper)
+# Injection chain extraction
 # ---------------------------------------------------------------------------
 
 def get_apmx_injection_info(
@@ -1499,8 +1449,7 @@ def get_apmx_injection_info(
                 if ds and ds.get("szExeFile"):
                     toolhelp_entries.append(ds)
 
-    # Fallback: scan for .exe strings near Process32 calls (for captures
-    # where PROCESSENTRY32W struct data is not inlined in the param block)
+    # Fallback: scan for .exe strings near Process32 calls
     if not toolhelp_entries and p32_range:
         ctx_start = max(0, p32_range[0] - 5)
         ctx_end = p32_range[1] + 10
@@ -1554,11 +1503,8 @@ def get_apmx_injection_info(
                     chain_info["target_process"] = te.get("szExeFile")
                     break
 
-        # Fallback: use most-common .exe string from Process32 context
+        # Fallback: most-common .exe string near Process32 calls
         if "target_process" not in chain_info and toolhelp_exe_strings:
-            # The target exe name appears in every Process32 iteration
-            # (compared against each enumerated process), making it the
-            # most frequent .exe string in that range.
             most_common = toolhelp_exe_strings.most_common(1)[0][0]
             chain_info["target_process"] = most_common
 
@@ -1661,7 +1607,7 @@ def get_apmx_injection_info(
 
 
 # ---------------------------------------------------------------------------
-# Step 9: Context window query utilities
+# Context window query utilities
 # ---------------------------------------------------------------------------
 
 def get_apmx_calls_around(

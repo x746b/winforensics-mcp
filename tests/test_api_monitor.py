@@ -806,11 +806,7 @@ def _build_detailed_apmx(
     records: list[bytes],
     process_name: str = "test.exe",
 ) -> bytes:
-    """Build a synthetic APMX file with detailed call records.
-
-    Args:
-        records: List of binary records (from _build_call_record)
-    """
+    """Build a synthetic APMX file with detailed call records."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # info entry
@@ -881,16 +877,7 @@ class TestParseParamValues:
     """Test parameter value extraction from binary data."""
 
     def _build_overlapping_block(self, count, descriptors, all_values):
-        """Build a param block matching the real APMX overlap format.
-
-        In the APMX format, the last descriptor byte is shared with the
-        first data byte (they overlap at offset size_field).
-
-        Args:
-            count: number of parameters
-            descriptors: list of (b1,) per param - the descriptor byte encoding slot_count
-            all_values: flat list of all uint64 values across all params
-        """
+        """Build a param block matching the real APMX overlap format."""
         size_field = count * 4 + 1
         block = bytearray()
         block.append(count)
@@ -1253,7 +1240,7 @@ class TestInsiderCapture:
 
 
 # ---------------------------------------------------------------------------
-# P0: process_index consistency tests
+# process_index consistency tests
 # ---------------------------------------------------------------------------
 
 class TestProcessIndexConsistency:
@@ -1272,7 +1259,7 @@ class TestProcessIndexConsistency:
 
 
 # ---------------------------------------------------------------------------
-# P0: Call attribution "top API first" tests
+# Call attribution "top API first" tests
 # ---------------------------------------------------------------------------
 
 class TestCallAttribution:
@@ -1293,7 +1280,7 @@ class TestCallAttribution:
 
 
 # ---------------------------------------------------------------------------
-# P1: Named parameter tests
+# Named parameter tests
 # ---------------------------------------------------------------------------
 
 class TestCommonApiParams:
@@ -1361,7 +1348,7 @@ class TestCommonApiParams:
 
 
 # ---------------------------------------------------------------------------
-# P1: Toolhelp structure decoding tests
+# Toolhelp structure decoding tests
 # ---------------------------------------------------------------------------
 
 class TestProcessEntry32Decode:
@@ -1412,7 +1399,7 @@ class TestProcessEntry32Decode:
 
 
 # ---------------------------------------------------------------------------
-# P1: TLS callback pattern tests
+# TLS callback pattern tests
 # ---------------------------------------------------------------------------
 
 class TestTlsCallbackPattern:
@@ -1460,7 +1447,7 @@ class TestTlsCallbackPattern:
 
 
 # ---------------------------------------------------------------------------
-# P2/Step 5: Injection info tests
+# Injection info tests
 # ---------------------------------------------------------------------------
 
 class TestGetApmxInjectionInfo:
@@ -1551,7 +1538,7 @@ class TestGetApmxInjectionInfo:
 
 
 # ---------------------------------------------------------------------------
-# P3: Context window and param search tests
+# Context window and param search tests
 # ---------------------------------------------------------------------------
 
 class TestGetApmxCallsAround:
@@ -1616,7 +1603,7 @@ class TestSearchApmxParams:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests for new P0-P3 features against ANY real capture
+# Integration tests for new features against ANY real capture
 # ---------------------------------------------------------------------------
 
 class TestRealApmxNewFeatures:

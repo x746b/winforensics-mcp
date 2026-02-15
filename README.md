@@ -69,6 +69,15 @@ Use together for complete incident response across platforms.
 |----------|--------------|
 | **PCAP Analysis** | Parse PCAP/PCAPNG files - conversations, DNS queries, HTTP requests, suspicious connections |
 
+### API Monitor Capture Analysis
+| Category | Capabilities |
+|----------|--------------|
+| **APMX Parsing** | Parse [API Monitor](http://www.rohitab.com/apimonitor) captures (.apmx64/.apmx86) - process metadata, API call extraction, parameter values |
+| **Pattern Detection** | Detect injection, hollowing, credential dumping, and other attack patterns from captured API call sequences with MITRE ATT&CK mapping |
+| **Handle Correlation** | Track handle values across calls to reconstruct attack chains (OpenProcess -> VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread) |
+| **Injection Analysis** | Extract enriched injection chain details: target PID/process, shellcode size, allocation addresses, technique classification |
+| **API Knowledge Base** | 26,944 Windows API definitions with parameter signatures, DLL mappings, and category browsing |
+
 ### Malware Detection
 | Category | Capabilities |
 |----------|--------------|
@@ -423,6 +432,66 @@ The `yara_scan_directory` tool uses 718 rules from signature-base:
 }
 ```
 
+### Analyze API Monitor Capture
+
+```
+Parse the API Monitor capture at /evidence/inject.apmx64 and detect attack patterns
+```
+
+The `apmx_detect_patterns` tool identifies injection chains and maps them to MITRE ATT&CK:
+
+```json
+{
+  "total_records": 29230,
+  "unique_apis_seen": 47,
+  "patterns_detected": 2,
+  "risk_level": "high",
+  "details": [
+    {
+      "pattern_name": "Classic Process Injection",
+      "pattern_id": "classic_injection",
+      "mitre_id": "T1055.001",
+      "apis_matched": ["CreateRemoteThread", "OpenProcess", "VirtualAllocEx", "WriteProcessMemory"],
+      "risk": "high"
+    }
+  ],
+  "suspicious_call_timeline": [
+    {"record_index": 25664, "api": "OpenProcess"},
+    {"record_index": 29109, "api": "VirtualAllocEx"},
+    {"record_index": 29110, "api": "WriteProcessMemory"},
+    {"record_index": 29111, "api": "CreateRemoteThread"}
+  ]
+}
+```
+
+For enriched injection chain details:
+
+```
+Get injection info from /evidence/inject.apmx64
+```
+
+```json
+{
+  "injection_chains": [
+    {
+      "handle_hex": "0x268",
+      "target_pid": 16224,
+      "target_process": "notepad.exe",
+      "requested_alloc_size": 511,
+      "shellcode_size": 511,
+      "start_address_hex": "0x206583d0000",
+      "injection_technique": "Classic Process Injection",
+      "chain": [
+        {"api": "OpenProcess", "record": 25664},
+        {"api": "VirtualAllocEx", "record": 29109},
+        {"api": "WriteProcessMemory", "record": 29110},
+        {"api": "CreateRemoteThread", "record": 29111}
+      ]
+    }
+  ]
+}
+```
+
 ### Import Eric Zimmerman CSV Output
 
 Already ran MFTECmd on Windows? Import the CSV:
@@ -490,6 +559,23 @@ Ingest the MFTECmd CSV at /cases/MFTECmd_output.csv and search for .exe files
 | `pcap_get_http` | Extract HTTP requests with URLs, methods, user-agents |
 | `pcap_search` | Search packet payloads for strings or regex patterns |
 | `pcap_find_suspicious` | Detect C2 indicators, beaconing, DNS tunneling |
+
+### API Monitor Capture Analysis (APMX)
+
+| Tool | Description |
+|------|-------------|
+| `apmx_parse` | Parse .apmx64/.apmx86 capture - process info, modules, call counts |
+| `apmx_get_calls` | Extract API calls with filtering, pagination, and time range support |
+| `apmx_get_call_details` | Detailed records with parameter values, return values, timestamps |
+| `apmx_detect_patterns` | Detect attack patterns (injection, hollowing, credential dumping) with MITRE ATT&CK IDs |
+| `apmx_correlate_handles` | Track handle producer/consumer chains across API calls |
+| `apmx_get_injection_info` | Enriched injection chain extraction (target PID, shellcode size, technique) |
+| `apmx_get_calls_around` | Context window of calls around a specific record |
+| `apmx_search_params` | Search all records for a specific parameter value |
+| `api_analyze_imports` | Full PE import analysis with pattern detection and MITRE ATT&CK mapping |
+| `api_detect_patterns` | Detect attack patterns from PE import tables |
+| `api_lookup` | Look up Windows API signature (26,944 APIs with params, DLL, category) |
+| `api_search_category` | Browse APIs by category (e.g., "Process Injection", "File Management") |
 
 ### Packer Detection (DiE)
 
@@ -728,6 +814,15 @@ All parsing is done with pure Python libraries:
 
 ## Changelog
 
+### v0.5.0 - API Monitor & Runtime Analysis Edition
+- **API Monitor Integration**: Parse Rohitab API Monitor captures (.apmx64/.apmx86) with full call extraction, parameter decoding, and handle correlation
+- **Runtime Pattern Detection**: Detect injection, hollowing, credential dumping, and 16+ attack patterns from captured API call sequences with MITRE ATT&CK mapping
+- **Injection Chain Analysis**: Enriched extraction with target PID/process, shellcode size, allocation addresses, and technique classification
+- **Windows API Knowledge Base**: 26,944 API definitions with parameter signatures, DLL mappings, and category browsing
+- **PE Import Analysis**: Static import pattern detection with MITRE ATT&CK technique mapping
+- **Flag/Enum Decoding**: Automatic symbolic decoding of process access rights, memory protection flags, and allocation types
+- **New Tools**: `apmx_*`, `api_analyze_imports`, `api_detect_patterns`, `api_lookup`, `api_search_category`
+
 ### v0.4.0 - Threat Intel & Network Edition
 - **YARA Scanning**: 718 bundled rules from signature-base (APT, ransomware, hacktools, webshells)
 - **VirusTotal Integration**: Hash/IP/domain lookups with rate limiting and 24h caching
@@ -735,13 +830,21 @@ All parsing is done with pure Python libraries:
 - **DiE Integration**: Packer/compiler detection via Detect It Easy CLI
 - **hunt_ioc Enhancement**: Optional `yara_scan=True` parameter to scan found files with YARA rules
 - **New Tools**: `yara_scan_*`, `vt_lookup_*`, `pcap_*`, `die_*`
-- **Total Tools**: 46
+- **Total Tools**: 46 (base)
 
 ### v0.3.x
 - Core forensics: EVTX, Registry, PE analysis, Prefetch, Amcache, SRUM
 - File system: MFT parsing with timestomping detection, USN Journal
 - User activity: Browser history, LNK files, ShellBags
 - Orchestrators: `investigate_execution`, `investigate_user_activity`, `hunt_ioc`, `build_timeline`
+
+---
+
+## Credits
+
+- **[Rohitab Batra](http://www.rohitab.com/apimonitor)** - Author of [API Monitor](http://www.rohitab.com/apimonitor), a powerful tool for spying on Windows API calls and COM interfaces. The APMX parser in this project was reverse-engineered from API Monitor capture files.
+- **[Neo23x0/signature-base](https://github.com/Neo23x0/signature-base)** - YARA rule collection used for malware detection
+- **[horsicq/DIE-engine](https://github.com/horsicq/DIE-engine)** - Detect It Easy packer/compiler identification engine
 
 ---
 
