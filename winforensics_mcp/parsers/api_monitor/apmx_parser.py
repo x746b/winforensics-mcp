@@ -201,6 +201,115 @@ COMMON_API_PARAMS: dict[str, list[str]] = {
 
 
 # ---------------------------------------------------------------------------
+# Flag/enum decoding for common API parameters
+# ---------------------------------------------------------------------------
+
+# Process access rights (OpenProcess dwDesiredAccess)
+_PROCESS_ACCESS_FLAGS: dict[int, str] = {
+    0x0001: "PROCESS_TERMINATE",
+    0x0002: "PROCESS_CREATE_THREAD",
+    0x0004: "PROCESS_SET_SESSIONID",
+    0x0008: "PROCESS_VM_OPERATION",
+    0x0010: "PROCESS_VM_READ",
+    0x0020: "PROCESS_VM_WRITE",
+    0x0040: "PROCESS_DUP_HANDLE",
+    0x0080: "PROCESS_CREATE_PROCESS",
+    0x0100: "PROCESS_SET_QUOTA",
+    0x0200: "PROCESS_SET_INFORMATION",
+    0x0400: "PROCESS_QUERY_INFORMATION",
+    0x0800: "PROCESS_SUSPEND_RESUME",
+    0x1000: "PROCESS_QUERY_LIMITED_INFORMATION",
+    0x2000: "PROCESS_SET_LIMITED_INFORMATION",
+    0x001F_0FFF: "PROCESS_ALL_ACCESS",
+    0x0010_0000: "SYNCHRONIZE",
+}
+
+# Memory allocation type (VirtualAllocEx flAllocationType)
+_MEM_ALLOC_FLAGS: dict[int, str] = {
+    0x0000_1000: "MEM_COMMIT",
+    0x0000_2000: "MEM_RESERVE",
+    0x0000_4000: "MEM_DECOMMIT",
+    0x0000_8000: "MEM_RELEASE",
+    0x0008_0000: "MEM_RESET",
+    0x0010_0000: "MEM_TOP_DOWN",
+    0x0020_0000: "MEM_WRITE_WATCH",
+    0x0040_0000: "MEM_PHYSICAL",
+    0x0100_0000: "MEM_RESET_UNDO",
+    0x2000_0000: "MEM_LARGE_PAGES",
+}
+
+# Memory protection (VirtualAllocEx/VirtualProtectEx flProtect/flNewProtect)
+_MEM_PROTECT_FLAGS: dict[int, str] = {
+    0x01: "PAGE_NOACCESS",
+    0x02: "PAGE_READONLY",
+    0x04: "PAGE_READWRITE",
+    0x08: "PAGE_WRITECOPY",
+    0x10: "PAGE_EXECUTE",
+    0x20: "PAGE_EXECUTE_READ",
+    0x40: "PAGE_EXECUTE_READWRITE",
+    0x80: "PAGE_EXECUTE_WRITECOPY",
+    0x100: "PAGE_GUARD",
+    0x200: "PAGE_NOCACHE",
+    0x400: "PAGE_WRITECOMBINE",
+}
+
+# CreateToolhelp32Snapshot dwFlags
+_TH32CS_FLAGS: dict[int, str] = {
+    0x01: "TH32CS_SNAPHEAPLIST",
+    0x02: "TH32CS_SNAPPROCESS",
+    0x04: "TH32CS_SNAPTHREAD",
+    0x08: "TH32CS_SNAPMODULE",
+    0x10: "TH32CS_SNAPMODULE32",
+    0x80000000: "TH32CS_INHERIT",
+}
+
+# Thread creation flags (CreateRemoteThread dwCreationFlags)
+_THREAD_CREATION_FLAGS: dict[int, str] = {
+    0x00: "0",
+    0x04: "CREATE_SUSPENDED",
+    0x00010000: "STACK_SIZE_PARAM_IS_A_RESERVATION",
+}
+
+# Maps (api_name, param_name) to the flag lookup table
+_PARAM_FLAG_MAP: dict[tuple[str, str], dict[int, str]] = {
+    ("OpenProcess", "dwDesiredAccess"): _PROCESS_ACCESS_FLAGS,
+    ("VirtualAllocEx", "flAllocationType"): _MEM_ALLOC_FLAGS,
+    ("VirtualAllocEx", "flProtect"): _MEM_PROTECT_FLAGS,
+    ("VirtualAlloc", "flAllocationType"): _MEM_ALLOC_FLAGS,
+    ("VirtualAlloc", "flProtect"): _MEM_PROTECT_FLAGS,
+    ("VirtualProtectEx", "flNewProtect"): _MEM_PROTECT_FLAGS,
+    ("VirtualProtect", "flNewProtect"): _MEM_PROTECT_FLAGS,
+    ("NtAllocateVirtualMemory", "AllocationType"): _MEM_ALLOC_FLAGS,
+    ("NtAllocateVirtualMemory", "Protect"): _MEM_PROTECT_FLAGS,
+    ("CreateToolhelp32Snapshot", "dwFlags"): _TH32CS_FLAGS,
+    ("CreateRemoteThread", "dwCreationFlags"): _THREAD_CREATION_FLAGS,
+    ("CreateRemoteThreadEx", "dwCreationFlags"): _THREAD_CREATION_FLAGS,
+    ("CreateThread", "dwCreationFlags"): _THREAD_CREATION_FLAGS,
+}
+
+
+def _decode_flags(value: int, flag_table: dict[int, str]) -> str:
+    """Decode a bitmask value into symbolic flag names."""
+    if not isinstance(value, int) or value < 0:
+        return ""
+    # Check for exact match first (e.g., PROCESS_ALL_ACCESS)
+    if value in flag_table:
+        return flag_table[value]
+    parts = []
+    remaining = value
+    # Sort by value descending to match largest flags first
+    for flag_val, flag_name in sorted(flag_table.items(), reverse=True):
+        if flag_val == 0:
+            continue
+        if remaining & flag_val == flag_val:
+            parts.append(flag_name)
+            remaining &= ~flag_val
+    if remaining:
+        parts.append(f"0x{remaining:x}")
+    return " | ".join(reversed(parts)) if parts else f"0x{value:x}"
+
+
+# ---------------------------------------------------------------------------
 # Toolhelp structure decoding (Step 4)
 # ---------------------------------------------------------------------------
 
@@ -413,6 +522,7 @@ def _parse_call_record(
     result: dict[str, Any] = {"call_index": record_index}
 
     # Header fields
+    fmt_version = struct.unpack_from("<I", rec, 0x04)[0]
     result["record_index"] = struct.unpack_from("<I", rec, 0x08)[0]
     parent = struct.unpack_from("<I", rec, 0x0C)[0]
     result["parent_index"] = parent if parent != 0xFFFFFFFF else None
@@ -455,6 +565,18 @@ def _parse_call_record(
             return result
 
         result["param_count"] = count
+
+        # Format v8 (e.g. powershell.exe in newer captures) packs params
+        # into 2 large groups with 7-10 slots each rather than individual
+        # params.  Flag this so consumers know param values are grouped.
+        if fmt_version >= 8 and count <= 2:
+            total_slots = 0
+            for p in range(count):
+                do = 0x92 + p * 4
+                if do + 4 <= len(rec):
+                    total_slots += rec[do + 1] >> 4
+            if total_slots > 10:
+                result["param_format"] = "grouped"
 
         # Parse pre-call values
         pre_block = rec[0x90 : 0x90 + pre_size]
@@ -533,6 +655,21 @@ def _parse_call_record(
                     continue
                 p["name"] = param_names[name_idx]
                 name_idx += 1
+
+        # Decode flag/enum values for named parameters
+        if api_for_naming:
+            for p in params_out:
+                pname = p.get("name")
+                if not pname:
+                    continue
+                flag_table = _PARAM_FLAG_MAP.get((api_for_naming, pname))
+                if flag_table is None:
+                    continue
+                val = p.get("pre_value")
+                if isinstance(val, int):
+                    decoded_str = _decode_flags(val, flag_table)
+                    if decoded_str:
+                        p["decoded_value"] = decoded_str
 
         # Decode Toolhelp output structures (Step 4)
         if api_for_naming in ("Process32FirstW", "Process32NextW", "Process32First", "Process32Next"):
@@ -720,12 +857,28 @@ def parse_apmx(file_path: str | Path) -> dict[str, Any]:
     return result
 
 
+def _iso_to_filetime(iso_str: str) -> int | None:
+    """Convert an ISO 8601 datetime string to Windows FILETIME ticks."""
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = dt - _FILETIME_EPOCH
+        return int(delta.total_seconds() * _FILETIME_TICKS_PER_SEC)
+    except (ValueError, OverflowError):
+        return None
+
+
 def get_apmx_calls(
     file_path: str | Path,
     process_index: int = 0,
     api_filter: str | None = None,
     limit: int = 500,
     offset: int = 0,
+    time_range_start: str | None = None,
+    time_range_end: str | None = None,
 ) -> dict[str, Any]:
     """Extract API call records from an APMX capture.
 
@@ -735,6 +888,8 @@ def get_apmx_calls(
         api_filter: Optional API name substring filter (case-insensitive)
         limit: Max records to return
         offset: Skip first N matching records (pagination)
+        time_range_start: ISO 8601 datetime — only include calls at or after this time
+        time_range_end: ISO 8601 datetime — only include calls at or before this time
 
     Returns:
         Dict with call records, each containing api_names and call index
@@ -757,6 +912,10 @@ def get_apmx_calls(
     num_records = len(calls_data) // 8
     offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
 
+    # Convert time range to FILETIME for fast comparison
+    ft_start = _iso_to_filetime(time_range_start) if time_range_start else None
+    ft_end = _iso_to_filetime(time_range_end) if time_range_end else None
+
     records = []
     skipped = 0
     filter_lower = api_filter.lower() if api_filter else None
@@ -765,6 +924,14 @@ def get_apmx_calls(
         off = offsets_arr[i]
         next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
         rec = api_data[off:next_off]
+
+        # Time range filter (timestamp at offset 0x48)
+        if (ft_start is not None or ft_end is not None) and len(rec) >= 0x50:
+            filetime = struct.unpack_from("<Q", rec, 0x48)[0]
+            if ft_start is not None and filetime < ft_start:
+                continue
+            if ft_end is not None and filetime > ft_end:
+                continue
 
         api_name = _get_record_api_name(rec, api_data, off, defs_blob)
         embedded_names = _extract_api_names(rec)
@@ -804,6 +971,8 @@ def get_apmx_calls(
         "returned": len(records),
         "offset": offset,
         "filter": api_filter,
+        "time_range_start": time_range_start,
+        "time_range_end": time_range_end,
         "calls": records,
     }
 
@@ -1317,15 +1486,35 @@ def get_apmx_injection_info(
 
     # Collect Process32 results for target process lookup
     toolhelp_entries: list[dict[str, Any]] = []
+    toolhelp_exe_strings: Counter[str] = Counter()
     p32_calls = get_apmx_calls(file_path, process_index=process_index, api_filter="Process32", limit=200)
+    p32_range: tuple[int, int] | None = None
     if p32_calls.get("returned", 0) > 0:
         p32_indices = [c["call_index"] for c in p32_calls["calls"]]
+        p32_range = (min(p32_indices), max(p32_indices))
         p32_details = get_apmx_call_details(file_path, process_index=process_index, call_indices=p32_indices)
         for c in p32_details.get("calls", []):
             for p in c.get("parameters", []):
                 ds = p.get("decoded_struct")
                 if ds and ds.get("szExeFile"):
                     toolhelp_entries.append(ds)
+
+    # Fallback: scan for .exe strings near Process32 calls (for captures
+    # where PROCESSENTRY32W struct data is not inlined in the param block)
+    if not toolhelp_entries and p32_range:
+        ctx_start = max(0, p32_range[0] - 5)
+        ctx_end = p32_range[1] + 10
+        ctx_indices = list(range(ctx_start, ctx_end + 1))
+        ctx_details = get_apmx_call_details(
+            file_path, process_index=process_index,
+            call_indices=ctx_indices, limit=len(ctx_indices),
+        )
+        for c in ctx_details.get("calls", []):
+            for p in c.get("parameters", []):
+                for s in p.get("strings", []):
+                    low = s.strip().lower()
+                    if low.endswith(".exe") and len(s) < 50:
+                        toolhelp_exe_strings[s.strip()] += 1
 
     # Build injection chains
     injection_chains: list[dict[str, Any]] = []
@@ -1364,6 +1553,14 @@ def get_apmx_injection_info(
                 if te.get("th32ProcessID") == target_pid:
                     chain_info["target_process"] = te.get("szExeFile")
                     break
+
+        # Fallback: use most-common .exe string from Process32 context
+        if "target_process" not in chain_info and toolhelp_exe_strings:
+            # The target exe name appears in every Process32 iteration
+            # (compared against each enumerated process), making it the
+            # most frequent .exe string in that range.
+            most_common = toolhelp_exe_strings.most_common(1)[0][0]
+            chain_info["target_process"] = most_common
 
         # Get VirtualAllocEx details
         for consumer in chain["consumers"]:

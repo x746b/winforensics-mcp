@@ -1020,6 +1020,14 @@ async def list_tools() -> list[Tool]:
                             "default": 0,
                             "description": "Skip first N matching records (for pagination)",
                         },
+                        "time_range_start": {
+                            "type": "string",
+                            "description": "ISO 8601 datetime — only include calls at or after this time",
+                        },
+                        "time_range_end": {
+                            "type": "string",
+                            "description": "ISO 8601 datetime — only include calls at or before this time",
+                        },
                     },
                     "required": ["file_path"],
                 },
@@ -2311,6 +2319,8 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 api_filter=args.get("api_filter"),
                 limit=args.get("limit", 500),
                 offset=args.get("offset", 0),
+                time_range_start=args.get("time_range_start"),
+                time_range_end=args.get("time_range_end"),
             )
             return json_response(result)
         except FileNotFoundError as e:

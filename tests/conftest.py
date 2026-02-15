@@ -63,6 +63,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Expected target process name (e.g. 'notepad.exe')",
     )
+    group.addoption(
+        "--expected-alloc-size",
+        default=None,
+        type=int,
+        help="Expected requested_alloc_size from VirtualAllocEx (e.g. 511)",
+    )
+    group.addoption(
+        "--expected-aligned-size",
+        default=None,
+        type=int,
+        help="Expected aligned_alloc_size from VirtualAllocEx post-value (e.g. 4096)",
+    )
 
 
 def _autodiscover_apmx() -> Path | None:
@@ -98,4 +110,6 @@ def expected_answers(request: pytest.FixtureRequest) -> dict:
         "exec_api": request.config.getoption("--expected-exec-api"),
         "term_api": request.config.getoption("--expected-term-api"),
         "target_process": request.config.getoption("--expected-target-process"),
+        "alloc_size": request.config.getoption("--expected-alloc-size"),
+        "aligned_size": request.config.getoption("--expected-aligned-size"),
     }

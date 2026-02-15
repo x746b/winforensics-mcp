@@ -12,7 +12,9 @@ Usage:
         --expected-snapshot-api CreateToolhelp32Snapshot \
         --expected-exec-api CreateRemoteThread \
         --expected-term-api ExitProcess \
-        --expected-target-process notepad.exe
+        --expected-target-process notepad.exe \
+        --expected-alloc-size 511 \
+        --expected-aligned-size 4096
 """
 
 from __future__ import annotations
@@ -178,3 +180,66 @@ def test_tls_pattern_detected(apmx_file, expected_answers):
     result = detect_apmx_patterns(str(apmx_file))
     ids = [d["pattern_id"] for d in result["details"]]
     assert "tls_callback_execution" in ids
+
+
+def test_target_process(apmx_file, expected_answers):
+    """P1: get_apmx_injection_info extracts target process from Toolhelp decode."""
+    _skip_if_no_file(apmx_file)
+    expected = _skip_if_no_answer(expected_answers, "target_process")
+    result = get_apmx_injection_info(str(apmx_file))
+    assert result["chain_count"] >= 1
+    chain = result["injection_chains"][0]
+    actual = chain.get("target_process", "")
+    assert actual.lower() == expected.lower(), f"Expected '{expected}', got '{actual}'"
+
+
+def test_requested_alloc_size(apmx_file, expected_answers):
+    """P1: get_apmx_injection_info reports correct requested_alloc_size."""
+    _skip_if_no_file(apmx_file)
+    expected = _skip_if_no_answer(expected_answers, "alloc_size")
+    result = get_apmx_injection_info(str(apmx_file))
+    assert result["chain_count"] >= 1
+    chain = result["injection_chains"][0]
+    assert chain.get("requested_alloc_size") == expected
+
+
+def test_aligned_alloc_size(apmx_file, expected_answers):
+    """P1: get_apmx_injection_info reports correct aligned_alloc_size."""
+    _skip_if_no_file(apmx_file)
+    expected = _skip_if_no_answer(expected_answers, "aligned_size")
+    result = get_apmx_injection_info(str(apmx_file))
+    assert result["chain_count"] >= 1
+    chain = result["injection_chains"][0]
+    assert chain.get("aligned_alloc_size") == expected
+
+
+def test_flag_decoding_openprocess(apmx_file):
+    """Flag decoding: OpenProcess dwDesiredAccess should have decoded_value."""
+    _skip_if_no_file(apmx_file)
+    calls = get_apmx_calls(str(apmx_file), api_filter="OpenProcess", limit=5)
+    if calls["returned"] == 0:
+        pytest.skip("No OpenProcess calls found")
+    idx = calls["calls"][0]["call_index"]
+    details = get_apmx_call_details(str(apmx_file), call_indices=[idx])
+    for c in details["calls"]:
+        for p in c.get("parameters", []):
+            if p.get("name") == "dwDesiredAccess":
+                assert "decoded_value" in p, "dwDesiredAccess should have decoded_value"
+                assert "PROCESS_" in p["decoded_value"] or "0x" in p["decoded_value"]
+                return
+    pytest.skip("OpenProcess with named params not found in capture")
+
+
+def test_time_range_filtering(apmx_file):
+    """P3: time range filtering excludes calls outside the window."""
+    _skip_if_no_file(apmx_file)
+    # Get timestamps from a few calls to establish a time window
+    details = get_apmx_call_details(str(apmx_file), limit=5)
+    timestamps = [c["timestamp"] for c in details["calls"] if c.get("timestamp")]
+    if len(timestamps) < 2:
+        pytest.skip("Not enough timestamped calls")
+    # Use second timestamp as start — should exclude first call
+    start_ts = timestamps[1]
+    all_calls = get_apmx_calls(str(apmx_file), limit=50000)
+    filtered = get_apmx_calls(str(apmx_file), limit=50000, time_range_start=start_ts)
+    assert filtered["returned"] < all_calls["returned"]

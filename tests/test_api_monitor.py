@@ -1690,3 +1690,121 @@ class TestRealApmxNewFeatures:
         assert "matches" in result
         assert "match_count" in result
         assert isinstance(result["matches"], list)
+
+    def test_flag_decoding_on_real_capture(self, apmx_file):
+        """Flag decoding: params with flag mappings get decoded_value."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        # Look for any API with known flag params
+        for api_name in ("OpenProcess", "VirtualAllocEx", "VirtualAlloc"):
+            calls = get_apmx_calls(str(apmx_file), api_filter=api_name, limit=1)
+            if calls["returned"] == 0:
+                continue
+            idx = calls["calls"][0]["call_index"]
+            details = get_apmx_call_details(str(apmx_file), call_indices=[idx])
+            call = details["calls"][0]
+            decoded = [p for p in call.get("parameters", []) if p.get("decoded_value")]
+            if decoded:
+                return  # success
+        pytest.skip("no API with flag decoding found in capture")
+
+    def test_time_range_filtering(self, apmx_file):
+        """P3: time range filtering reduces returned results."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        big_limit = 100_000
+        all_calls = get_apmx_calls(str(apmx_file), limit=big_limit)
+        if all_calls["returned"] < 10:
+            pytest.skip("not enough calls for time range test")
+        # Get a timestamp from the middle to use as start
+        mid_idx = all_calls["calls"][all_calls["returned"] // 2]["call_index"]
+        details = get_apmx_call_details(str(apmx_file), call_indices=[mid_idx])
+        ts = details["calls"][0].get("timestamp")
+        if not ts:
+            pytest.skip("no timestamp on middle call")
+        filtered = get_apmx_calls(str(apmx_file), limit=big_limit, time_range_start=ts)
+        assert filtered["returned"] < all_calls["returned"]
+
+
+# ---------------------------------------------------------------------------
+# Synthetic tests for flag decoding
+# ---------------------------------------------------------------------------
+
+class TestFlagDecoding:
+    """Unit tests for _decode_flags helper."""
+
+    def test_decode_process_access_single(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _PROCESS_ACCESS_FLAGS,
+        )
+        assert _decode_flags(0x0002, _PROCESS_ACCESS_FLAGS) == "PROCESS_CREATE_THREAD"
+
+    def test_decode_process_access_combined(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _PROCESS_ACCESS_FLAGS,
+        )
+        result = _decode_flags(0x000A, _PROCESS_ACCESS_FLAGS)
+        assert "PROCESS_CREATE_THREAD" in result
+        assert "PROCESS_VM_OPERATION" in result
+
+    def test_decode_process_all_access(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _PROCESS_ACCESS_FLAGS,
+        )
+        result = _decode_flags(0x001F_0FFF, _PROCESS_ACCESS_FLAGS)
+        assert result == "PROCESS_ALL_ACCESS"
+
+    def test_decode_mem_protect(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _MEM_PROTECT_FLAGS,
+        )
+        assert _decode_flags(0x20, _MEM_PROTECT_FLAGS) == "PAGE_EXECUTE_READ"
+        assert _decode_flags(0x40, _MEM_PROTECT_FLAGS) == "PAGE_EXECUTE_READWRITE"
+
+    def test_decode_mem_alloc(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _MEM_ALLOC_FLAGS,
+        )
+        result = _decode_flags(0x3000, _MEM_ALLOC_FLAGS)
+        assert "MEM_COMMIT" in result
+        assert "MEM_RESERVE" in result
+
+    def test_decode_unknown_bits(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _decode_flags,
+            _PROCESS_ACCESS_FLAGS,
+        )
+        # Unknown bit 0x4000
+        result = _decode_flags(0x4002, _PROCESS_ACCESS_FLAGS)
+        assert "PROCESS_CREATE_THREAD" in result
+        assert "0x4000" in result
+
+
+class TestTimeRangeFiltering:
+    """Synthetic tests for time range filtering in get_apmx_calls."""
+
+    def test_time_range_returns_metadata(self, tmp_path):
+        apmx = _build_synthetic_apmx()
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+        result = get_apmx_calls(str(f), time_range_start="2026-01-01T00:00:00")
+        assert "time_range_start" in result
+        assert result["time_range_start"] == "2026-01-01T00:00:00"
+
+    def test_iso_to_filetime_roundtrip(self):
+        from winforensics_mcp.parsers.api_monitor.apmx_parser import (
+            _filetime_to_iso,
+            _iso_to_filetime,
+        )
+        # Known value: 2026-01-15T12:00:00 UTC
+        iso = "2026-01-15T12:00:00+00:00"
+        ft = _iso_to_filetime(iso)
+        assert ft is not None
+        back = _filetime_to_iso(ft)
+        assert back is not None
+        assert back.startswith("2026-01-15T12:00:00")
