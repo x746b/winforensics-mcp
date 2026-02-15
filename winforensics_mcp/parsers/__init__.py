@@ -148,6 +148,9 @@ from .api_monitor import (
     detect_apmx_patterns,
     get_apmx_call_details,
     correlate_apmx_handles,
+    get_apmx_injection_info,
+    get_apmx_calls_around,
+    search_apmx_params,
     API_DB_AVAILABLE,
 )
 
@@ -270,5 +273,8 @@ __all__ = [
     "detect_apmx_patterns",
     "get_apmx_call_details",
     "correlate_apmx_handles",
+    "get_apmx_injection_info",
+    "get_apmx_calls_around",
+    "search_apmx_params",
     "API_DB_AVAILABLE",
 ]

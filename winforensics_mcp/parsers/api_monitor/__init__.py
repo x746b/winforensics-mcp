@@ -11,6 +11,9 @@ from .apmx_parser import (
     detect_apmx_patterns,
     get_apmx_call_details,
     correlate_apmx_handles,
+    get_apmx_injection_info,
+    get_apmx_calls_around,
+    search_apmx_params,
 )
 
 # Flag indicating the API DB module is available (always True - stdlib only)
@@ -30,5 +33,8 @@ __all__ = [
     "detect_apmx_patterns",
     "get_apmx_call_details",
     "correlate_apmx_handles",
+    "get_apmx_injection_info",
+    "get_apmx_calls_around",
+    "search_apmx_params",
     "API_DB_AVAILABLE",
 ]

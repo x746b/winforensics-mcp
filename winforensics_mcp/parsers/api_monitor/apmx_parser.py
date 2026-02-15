@@ -167,6 +167,113 @@ def _filetime_to_iso(filetime: int) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Named parameter mappings for common APIs (Step 3)
+# ---------------------------------------------------------------------------
+
+# Maps API names to ordered parameter name lists.  Index 0 in the APMX
+# parameter block is the *return value* (for APIs with output params at
+# position 0).  The names here correspond to the positional params as
+# they appear in the binary block — *not* the MSDN signature, because
+# the APMX format prepends a return-value slot.
+COMMON_API_PARAMS: dict[str, list[str]] = {
+    "CreateToolhelp32Snapshot": ["dwFlags", "th32ProcessID"],
+    "Process32FirstW": ["hSnapshot", "lppe"],
+    "Process32NextW": ["hSnapshot", "lppe"],
+    "Process32First": ["hSnapshot", "lppe"],
+    "Process32Next": ["hSnapshot", "lppe"],
+    "OpenProcess": ["dwDesiredAccess", "bInheritHandle", "dwProcessId"],
+    "VirtualAllocEx": ["hProcess", "lpAddress", "dwSize", "flAllocationType", "flProtect"],
+    "WriteProcessMemory": ["hProcess", "lpBaseAddress", "lpBuffer", "nSize", "lpNumberOfBytesWritten"],
+    "CreateRemoteThread": ["hProcess", "lpThreadAttributes", "dwStackSize", "lpStartAddress", "lpParameter", "dwCreationFlags", "lpThreadId"],
+    "CreateRemoteThreadEx": ["hProcess", "lpThreadAttributes", "dwStackSize", "lpStartAddress", "lpParameter", "dwCreationFlags", "lpThreadId", "lpAttributeList"],
+    "ExitProcess": ["uExitCode"],
+    "CloseHandle": ["hObject"],
+    "VirtualProtectEx": ["hProcess", "lpAddress", "dwSize", "flNewProtect", "lpflOldProtect"],
+    "ReadProcessMemory": ["hProcess", "lpBaseAddress", "lpBuffer", "nSize", "lpNumberOfBytesRead"],
+    "NtAllocateVirtualMemory": ["ProcessHandle", "BaseAddress", "ZeroBits", "RegionSize", "AllocationType", "Protect"],
+    "VirtualAlloc": ["lpAddress", "dwSize", "flAllocationType", "flProtect"],
+    "VirtualProtect": ["lpAddress", "dwSize", "flNewProtect", "lpflOldProtect"],
+    "CreateThread": ["lpThreadAttributes", "dwStackSize", "lpStartAddress", "lpParameter", "dwCreationFlags", "lpThreadId"],
+    "NtWriteVirtualMemory": ["ProcessHandle", "BaseAddress", "Buffer", "BufferSize", "NumberOfBytesWritten"],
+    "NtReadVirtualMemory": ["ProcessHandle", "BaseAddress", "Buffer", "BufferSize", "NumberOfBytesRead"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Toolhelp structure decoding (Step 4)
+# ---------------------------------------------------------------------------
+
+def _decode_processentry32w(param_data: dict) -> dict[str, Any] | None:
+    """Decode a PROCESSENTRY32W structure from a parameter's uint64 slot values.
+
+    PROCESSENTRY32W layout (total 568 bytes = 71 uint64 slots):
+      dwSize:              4 bytes  (offset 0)
+      cntUsage:            4 bytes  (offset 4)
+      th32ProcessID:       4 bytes  (offset 8)
+      th32DefaultHeapID:   8 bytes  (offset 12)
+      th32ModuleID:        4 bytes  (offset 20)
+      cntThreads:          4 bytes  (offset 24)
+      th32ParentProcessID: 4 bytes  (offset 28)
+      pcPriClassBase:      4 bytes  (offset 32)
+      dwFlags:             4 bytes  (offset 36)
+      szExeFile:           260*2=520 bytes (offset 40, WCHAR[MAX_PATH])
+
+    We reconstruct the raw bytes from the uint64 slot values, then extract fields.
+    """
+    slots = param_data.get("values", [])
+    if len(slots) < 8:
+        return None
+
+    # Reconstruct raw bytes from uint64 slots
+    raw = b""
+    for v in slots:
+        raw += struct.pack("<Q", v)
+
+    if len(raw) < 44:
+        return None
+
+    dw_size = struct.unpack_from("<I", raw, 0)[0]
+    # PROCESSENTRY32W.dwSize should be 568
+    if dw_size != 568 and dw_size != 556:
+        # 568 = sizeof(PROCESSENTRY32W), 556 = sizeof(PROCESSENTRY32A)
+        return None
+
+    th32_process_id = struct.unpack_from("<I", raw, 8)[0]
+    cnt_threads = struct.unpack_from("<I", raw, 24)[0]
+    th32_parent_process_id = struct.unpack_from("<I", raw, 28)[0]
+
+    # Extract szExeFile (starts at offset 40)
+    exe_name = ""
+    if dw_size == 568 and len(raw) >= 44 + 10:
+        # Wide string (UTF-16LE)
+        exe_bytes = raw[40:40 + 520]
+        try:
+            exe_name = exe_bytes.decode("utf-16-le", errors="replace").split("\x00")[0]
+        except Exception:
+            pass
+    elif dw_size == 556 and len(raw) >= 44 + 10:
+        # ANSI string
+        exe_bytes = raw[40:40 + 260]
+        try:
+            exe_name = exe_bytes.decode("ascii", errors="replace").split("\x00")[0]
+        except Exception:
+            pass
+
+    if not exe_name and th32_process_id == 0:
+        return None
+
+    result: dict[str, Any] = {
+        "th32ProcessID": th32_process_id,
+        "th32ParentProcessID": th32_parent_process_id,
+        "cntThreads": cnt_threads,
+    }
+    if exe_name:
+        result["szExeFile"] = exe_name
+
+    return result
+
+
 def _parse_param_values(
     param_block: bytes, count: int, size_field: int
 ) -> list[dict[str, Any]]:
@@ -242,12 +349,13 @@ def _parse_param_values(
 
 
 def _extract_strings_from_values(values: list[int]) -> list[str]:
-    """Try to decode UTF-16LE strings from uint64 value sequences."""
+    """Try to decode UTF-16LE and ASCII strings from uint64 value sequences."""
     strings: list[str] = []
     # Pack values into bytes
     raw = b""
     for v in values:
         raw += struct.pack("<Q", v)
+
     # Scan for UTF-16LE strings (at least 3 chars)
     i = 0
     while i < len(raw) - 5:
@@ -266,6 +374,28 @@ def _extract_strings_from_values(values: list[int]) -> list[str]:
                 except (UnicodeDecodeError, ValueError):
                     pass
         i += 1
+
+    # Also scan for ASCII strings (at least 4 printable chars)
+    if not strings:
+        i = 0
+        while i < len(raw) - 3:
+            if 0x20 <= raw[i] <= 0x7E:
+                end = i
+                while end < len(raw) and 0x20 <= raw[end] <= 0x7E:
+                    end += 1
+                if end - i >= 4:
+                    try:
+                        s = raw[i:end].decode("ascii")
+                        if all(c.isprintable() for c in s):
+                            strings.append(s)
+                    except (UnicodeDecodeError, ValueError):
+                        pass
+                    i = end
+                else:
+                    i += 1
+            else:
+                i += 1
+
     return strings
 
 
@@ -306,9 +436,12 @@ def _parse_call_record(
         defs_name = _resolve_name_from_defs(defs_blob, code_addr)
 
     embedded_names = _extract_api_names(rec)
-    result["api_name"] = (embedded_names[0] if embedded_names else None) or defs_name
-    if defs_name and defs_name != result.get("api_name"):
-        result["native_api"] = defs_name
+    top_api = (embedded_names[0] if embedded_names else None) or defs_name
+    result["api_name"] = top_api
+    result["top_api"] = top_api  # explicit alias — what analysts usually want
+    if defs_name and defs_name != top_api:
+        result["resolved_api"] = defs_name
+        result["native_api"] = defs_name  # backward compat alias
     if len(embedded_names) > 1:
         result["nested_apis"] = embedded_names[1:]
 
@@ -374,7 +507,7 @@ def _parse_call_record(
                             pinfo["is_return"] = True
 
             # Extract embedded strings from multi-slot params
-            if pre["slot_count"] >= 6 and pre["values"]:
+            if pre["slot_count"] >= 4 and pre["values"]:
                 # Skip the first few header slots (flag, addr, value)
                 # and scan remaining for UTF-16LE strings
                 string_slots = pre["values"][2:] if pre["slot_count"] < 5 else pre["values"][1:]
@@ -383,6 +516,36 @@ def _parse_call_record(
                     pinfo["strings"] = strings
 
             params_out.append(pinfo)
+
+        # Attach named parameters if we have a mapping for this API (Step 3)
+        # The APMX format may insert an extra "return value" slot (marked with
+        # is_return=True) that doesn't correspond to any MSDN parameter.
+        # We assign names only to non-return slots.
+        api_for_naming = result.get("api_name") or ""
+        param_names = COMMON_API_PARAMS.get(api_for_naming)
+        if param_names:
+            name_idx = 0
+            for p in params_out:
+                if name_idx >= len(param_names):
+                    break
+                # Skip the return-value slot (detected by pre/post comparison)
+                if p.get("is_return"):
+                    continue
+                p["name"] = param_names[name_idx]
+                name_idx += 1
+
+        # Decode Toolhelp output structures (Step 4)
+        if api_for_naming in ("Process32FirstW", "Process32NextW", "Process32First", "Process32Next"):
+            # The second actual parameter (lppe) contains the PROCESSENTRY32W struct.
+            # In the param block it's typically at index 1 or 2 depending on return slot.
+            for p in params_out:
+                if p.get("name") == "lppe" and post_params:
+                    # Use post-call values since the struct is filled after the call
+                    p_idx_val = p["index"]
+                    if p_idx_val < len(post_params):
+                        decoded = _decode_processentry32w(post_params[p_idx_val])
+                        if decoded:
+                            p["decoded_struct"] = decoded
 
         result["parameters"] = params_out
         if return_value is not None:
@@ -400,8 +563,10 @@ def _parse_process_info(data: bytes) -> dict[str, Any]:
     if len(data) < 20:
         return info
 
-    # First 4 bytes: process index
-    info["process_index"] = struct.unpack_from("<I", data, 0)[0]
+    # First 4 bytes: 1-based process index from the binary (internal use only).
+    # We intentionally do NOT expose this as "process_index" since the public
+    # API uses 0-based indices derived from ZIP path names (see parse_apmx).
+    info["_raw_process_index"] = struct.unpack_from("<I", data, 0)[0]
     offset = 8
 
     # PID
@@ -532,7 +697,9 @@ def parse_apmx(file_path: str | Path) -> dict[str, Any]:
         info_key = f"process/{idx}/info"
         if info_key in entry_names:
             pinfo = _parse_process_info(zf.read(info_key))
-            pinfo["index"] = idx
+            pinfo["index"] = idx  # canonical 0-based index from ZIP path
+            # Remove internal raw field — only expose the 0-based index
+            pinfo.pop("_raw_process_index", None)
 
             # Call count
             calls_key = f"process/{idx}/calls"
@@ -775,6 +942,24 @@ def detect_apmx_patterns(
 
         if len(matched) >= pattern["min_match"]:
             missing_required = pattern["required"] - all_apis
+
+            # Temporal check for tls_callback_execution:
+            # Only flag if FLS/TLS APIs appear in the first 200 records AND
+            # an injection chain pattern is also present.
+            if pattern.get("_requires_temporal_check") and pattern_id == "tls_callback_execution":
+                fls_tls_apis = {"FlsAlloc", "FlsSetValue", "TlsAlloc", "TlsSetValue",
+                                "FlsFree", "TlsFree", "FlsGetValue", "TlsGetValue"}
+                early_fls = any(
+                    api_first_seen.get(api, 999999) < 200
+                    for api in (matched & fls_tls_apis)
+                )
+                has_injection = any(
+                    api in all_apis
+                    for api in ("VirtualAllocEx", "WriteProcessMemory",
+                                "NtAllocateVirtualMemory", "NtWriteVirtualMemory")
+                )
+                if not (early_fls and has_injection):
+                    continue
 
             # Build timeline of matched APIs
             timeline = []
@@ -1089,4 +1274,327 @@ def correlate_apmx_handles(
         "handle_chains": chains,
         "chain_count": len(chains),
         "orphan_handles": orphans[:20],  # limit orphans shown
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 5: Injection chain extraction (higher-level wrapper)
+# ---------------------------------------------------------------------------
+
+def get_apmx_injection_info(
+    file_path: str | Path,
+    process_index: int = 0,
+) -> dict[str, Any]:
+    """Extract enriched injection chain details from an APMX capture.
+
+    Wraps correlate_apmx_handles() and enriches each chain with:
+    - target_pid: from OpenProcess dwProcessId parameter
+    - target_process: from Process32FirstW/NextW decoded structs
+    - requested_alloc_size: from VirtualAllocEx dwSize pre-value
+    - aligned_alloc_size: from VirtualAllocEx dwSize post-value
+    - write_size: from WriteProcessMemory nSize
+    - shellcode_size: best estimate (write_size or requested_alloc_size)
+    - start_address: from CreateRemoteThread lpStartAddress
+    - injection_technique: detected technique label
+
+    Args:
+        file_path: Path to .apmx64 or .apmx86 file
+        process_index: Which process to analyze
+
+    Returns:
+        Dict with enriched injection chains
+    """
+    file_path = Path(file_path)
+
+    # Get handle chains
+    handle_result = correlate_apmx_handles(file_path, process_index=process_index)
+    if "error" in handle_result:
+        return handle_result
+
+    # Get pattern detection for technique labeling
+    pattern_result = detect_apmx_patterns(file_path, process_index=process_index)
+    pattern_ids = {d["pattern_id"] for d in pattern_result.get("details", [])}
+
+    # Collect Process32 results for target process lookup
+    toolhelp_entries: list[dict[str, Any]] = []
+    p32_calls = get_apmx_calls(file_path, process_index=process_index, api_filter="Process32", limit=200)
+    if p32_calls.get("returned", 0) > 0:
+        p32_indices = [c["call_index"] for c in p32_calls["calls"]]
+        p32_details = get_apmx_call_details(file_path, process_index=process_index, call_indices=p32_indices)
+        for c in p32_details.get("calls", []):
+            for p in c.get("parameters", []):
+                ds = p.get("decoded_struct")
+                if ds and ds.get("szExeFile"):
+                    toolhelp_entries.append(ds)
+
+    # Build injection chains
+    injection_chains: list[dict[str, Any]] = []
+
+    for chain in handle_result.get("handle_chains", []):
+        if chain["producer_api"] != "OpenProcess":
+            continue
+
+        consumer_apis = {c["api"] for c in chain["consumers"]}
+        # Must have at least VirtualAllocEx or WriteProcessMemory
+        if not (consumer_apis & {"VirtualAllocEx", "WriteProcessMemory", "NtAllocateVirtualMemory"}):
+            continue
+
+        chain_info: dict[str, Any] = {
+            "handle": chain["handle"],
+            "handle_hex": chain["handle_hex"],
+            "producer_record": chain["producer_record"],
+        }
+
+        # Get OpenProcess details for target PID
+        op_details = get_apmx_call_details(
+            file_path, process_index=process_index,
+            call_indices=[chain["producer_record"]],
+        )
+        if op_details.get("calls"):
+            op_call = op_details["calls"][0]
+            for p in op_call.get("parameters", []):
+                if p.get("name") == "dwProcessId":
+                    chain_info["target_pid"] = p.get("pre_value")
+                    break
+
+        # Look up target process name from Toolhelp entries
+        target_pid = chain_info.get("target_pid")
+        if target_pid and toolhelp_entries:
+            for te in toolhelp_entries:
+                if te.get("th32ProcessID") == target_pid:
+                    chain_info["target_process"] = te.get("szExeFile")
+                    break
+
+        # Get VirtualAllocEx details
+        for consumer in chain["consumers"]:
+            if consumer["api"] in ("VirtualAllocEx", "NtAllocateVirtualMemory"):
+                va_details = get_apmx_call_details(
+                    file_path, process_index=process_index,
+                    call_indices=[consumer["record"]],
+                )
+                if va_details.get("calls"):
+                    va_call = va_details["calls"][0]
+                    for p in va_call.get("parameters", []):
+                        if p.get("name") == "dwSize":
+                            chain_info["requested_alloc_size"] = p.get("pre_value")
+                            if p.get("post_value") is not None and p.get("changed"):
+                                chain_info["aligned_alloc_size"] = p["post_value"]
+                            elif p.get("post_value") is not None:
+                                chain_info["aligned_alloc_size"] = p["post_value"]
+                            break
+                    chain_info["alloc_return"] = va_call.get("return_value")
+                    if va_call.get("return_hex"):
+                        chain_info["alloc_return_hex"] = va_call["return_hex"]
+                break
+
+        # Get WriteProcessMemory details
+        for consumer in chain["consumers"]:
+            if consumer["api"] in ("WriteProcessMemory", "NtWriteVirtualMemory"):
+                wpm_details = get_apmx_call_details(
+                    file_path, process_index=process_index,
+                    call_indices=[consumer["record"]],
+                )
+                if wpm_details.get("calls"):
+                    wpm_call = wpm_details["calls"][0]
+                    for p in wpm_call.get("parameters", []):
+                        if p.get("name") in ("nSize", "BufferSize"):
+                            chain_info["write_size"] = p.get("pre_value")
+                            break
+                break
+
+        # Get CreateRemoteThread details
+        for consumer in chain["consumers"]:
+            if consumer["api"] in ("CreateRemoteThread", "CreateRemoteThreadEx", "NtCreateThreadEx"):
+                crt_details = get_apmx_call_details(
+                    file_path, process_index=process_index,
+                    call_indices=[consumer["record"]],
+                )
+                if crt_details.get("calls"):
+                    crt_call = crt_details["calls"][0]
+                    for p in crt_call.get("parameters", []):
+                        if p.get("name") == "lpStartAddress":
+                            sa = p.get("pre_value")
+                            if sa:
+                                chain_info["start_address"] = sa
+                                chain_info["start_address_hex"] = f"0x{sa:x}"
+                            break
+                break
+
+        # Shellcode size: prefer requested_alloc_size from VirtualAllocEx (most
+        # reliable).  Only use write_size if it's smaller (partial write).
+        # WriteProcessMemory nSize can be unreliable due to multi-slot parsing
+        # artifacts in the APMX format.
+        write_sz = chain_info.get("write_size")
+        req_sz = chain_info.get("requested_alloc_size")
+        if req_sz:
+            if write_sz and 0 < write_sz <= req_sz:
+                chain_info["shellcode_size"] = write_sz
+            else:
+                chain_info["shellcode_size"] = req_sz
+        else:
+            chain_info["shellcode_size"] = write_sz
+
+        # Injection technique label
+        if "tls_callback_execution" in pattern_ids:
+            chain_info["injection_technique"] = "Thread Local Storage (TLS Callback)"
+        elif "classic_injection" in pattern_ids:
+            chain_info["injection_technique"] = "Classic Process Injection"
+        elif "apc_injection" in pattern_ids:
+            chain_info["injection_technique"] = "APC Queue Injection"
+        elif "process_hollowing" in pattern_ids:
+            chain_info["injection_technique"] = "Process Hollowing"
+        else:
+            chain_info["injection_technique"] = "Unknown"
+
+        # Consumer summary
+        chain_info["chain"] = [
+            {"api": chain["producer_api"], "record": chain["producer_record"]},
+        ] + [
+            {"api": c["api"], "record": c["record"]} for c in chain["consumers"]
+        ]
+
+        injection_chains.append(chain_info)
+
+    return {
+        "total_records": handle_result.get("total_records", 0),
+        "injection_chains": injection_chains,
+        "chain_count": len(injection_chains),
+        "patterns_detected": [d["pattern_id"] for d in pattern_result.get("details", [])],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 9: Context window query utilities
+# ---------------------------------------------------------------------------
+
+def get_apmx_calls_around(
+    file_path: str | Path,
+    call_index: int,
+    before: int = 10,
+    after: int = 10,
+    process_index: int = 0,
+) -> dict[str, Any]:
+    """Get context window of calls around a specific record index.
+
+    Args:
+        file_path: Path to .apmx64 or .apmx86 file
+        call_index: The center record index
+        before: Number of records before the target to include
+        after: Number of records after the target to include
+        process_index: Which process to read
+
+    Returns:
+        Dict with call records in the range [call_index-before, call_index+after]
+    """
+    start = max(0, call_index - before)
+    end = call_index + after
+    indices = list(range(start, end + 1))
+
+    result = get_apmx_call_details(
+        file_path, process_index=process_index,
+        call_indices=indices,
+    )
+
+    if "error" in result:
+        return result
+
+    return {
+        "center_index": call_index,
+        "range_start": start,
+        "range_end": end,
+        "total_records": result.get("total_records", 0),
+        "returned": result.get("returned", 0),
+        "calls": result.get("calls", []),
+    }
+
+
+def search_apmx_params(
+    file_path: str | Path,
+    value: int | str,
+    process_index: int = 0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Search all call records for a specific parameter value.
+
+    Searches pre-call and post-call parameter values for exact integer matches,
+    or string containment for string values.
+
+    Args:
+        file_path: Path to .apmx64 or .apmx86 file
+        value: Integer value or string to search for
+        process_index: Which process to search
+        limit: Maximum number of matching calls to return
+
+    Returns:
+        Dict with matching calls and the matched parameters highlighted
+    """
+    zf = _open_apmx_zip(file_path)
+
+    calls_key = f"process/{process_index}/calls"
+    data_key = f"process/{process_index}/data"
+
+    entry_names = [info.filename for info in zf.infolist()]
+    if calls_key not in entry_names or data_key not in entry_names:
+        zf.close()
+        return {"error": f"Process {process_index} not found in capture"}
+
+    calls_data = zf.read(calls_key)
+    api_data = zf.read(data_key)
+    defs_blob = zf.read("definitions") if "definitions" in entry_names else None
+    zf.close()
+
+    num_records = len(calls_data) // 8
+    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+
+    is_int_search = isinstance(value, int)
+    str_lower = str(value).lower() if not is_int_search else None
+
+    matches: list[dict[str, Any]] = []
+
+    for i in range(num_records):
+        off = offsets_arr[i]
+        next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
+        rec = api_data[off:next_off]
+
+        if len(rec) < 0x92:
+            continue
+
+        parsed = _parse_call_record(rec, i, defs_blob=defs_blob)
+        params = parsed.get("parameters", [])
+        matched_params: list[dict[str, Any]] = []
+
+        for p in params:
+            if is_int_search:
+                if p.get("pre_value") == value or p.get("post_value") == value:
+                    matched_params.append(p)
+            else:
+                # String search in parameter strings and hex values
+                for field in ("pre_value_hex", "post_value_hex"):
+                    fv = p.get(field, "")
+                    if str_lower and str_lower in str(fv).lower():
+                        matched_params.append(p)
+                        break
+                else:
+                    for s in p.get("strings", []):
+                        if str_lower and str_lower in s.lower():
+                            matched_params.append(p)
+                            break
+
+        if matched_params:
+            matches.append({
+                "call_index": i,
+                "api_name": parsed.get("api_name"),
+                "top_api": parsed.get("top_api"),
+                "timestamp": parsed.get("timestamp"),
+                "matched_params": matched_params,
+            })
+
+        if len(matches) >= limit:
+            break
+
+    return {
+        "total_records": num_records,
+        "search_value": value,
+        "matches": matches,
+        "match_count": len(matches),
     }

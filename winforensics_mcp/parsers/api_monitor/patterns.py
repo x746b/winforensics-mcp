@@ -157,6 +157,18 @@ PATTERNS: dict[str, dict[str, Any]] = {
         "min_match": 1,
         "risk": "low",
     },
+    "tls_callback_execution": {
+        "name": "TLS Callback Execution (Heuristic)",
+        "description": "Early TLS/FLS activity combined with injection chain and self-termination "
+                       "suggests code execution via TLS callbacks before main().",
+        "mitre_id": "T1055.001",
+        "required": {"FlsAlloc", "FlsSetValue", "ExitProcess"},
+        "optional": {"TlsAlloc", "TlsSetValue", "FlsFree", "TlsFree", "FlsGetValue", "TlsGetValue"},
+        "min_match": 2,
+        "risk": "high",
+        # Custom flag: detect_apmx_patterns applies a temporal check for this pattern.
+        "_requires_temporal_check": True,
+    },
 }
 
 

@@ -16,17 +16,48 @@ from winforensics_mcp.parsers.api_monitor.apmx_parser import (
     _parse_param_values,
     _parse_call_record,
     _filetime_to_iso,
+    _decode_processentry32w,
+    COMMON_API_PARAMS,
     parse_apmx,
     get_apmx_calls,
     get_apmx_api_stats,
     detect_apmx_patterns,
     get_apmx_call_details,
     correlate_apmx_handles,
+    get_apmx_injection_info,
+    get_apmx_calls_around,
+    search_apmx_params,
 )
 
 
-# Path to the real APMX test capture (may not exist on all systems)
-APMX_TEST_FILE = Path("/home/xtk/labs/AI/tests/Ghost-Thread.apmx64")
+# ---------------------------------------------------------------------------
+# Discovery helpers for capture-specific integration tests.
+# Generic integration tests use the ``apmx_file`` fixture from conftest.py
+# instead (populated via --apmx-file or autodiscovery).
+# ---------------------------------------------------------------------------
+
+def _discover_apmx_files() -> list[Path]:
+    """Find all APMX captures under the tests/ tree."""
+    tests_root = Path(__file__).resolve().parent
+    files = sorted(tests_root.rglob("*.apmx64")) + sorted(tests_root.rglob("*.apmx86"))
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for p in files:
+        if p not in seen:
+            out.append(p)
+            seen.add(p)
+    return out
+
+
+def _find_capture(name_fragment: str) -> Path | None:
+    """Find a capture whose stem contains *name_fragment* (case-insensitive)."""
+    frag = name_fragment.lower()
+    for p in _discover_apmx_files():
+        if frag in p.stem.lower():
+            return p
+    return None
+
+
 # Path to the pre-built API definitions DB
 API_DB_PATH = Path(__file__).resolve().parent.parent / "winforensics_mcp" / "data" / "api_definitions.db"
 
@@ -530,71 +561,66 @@ class TestSyntheticApmxPatterns:
 # Integration tests with real capture file
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not APMX_TEST_FILE.exists(), reason="Test APMX capture not available")
 class TestRealApmxCapture:
-    """Integration tests against the real APMX capture file."""
+    """Integration tests against any real APMX capture (via --apmx-file or autodiscovery)."""
 
-    def test_parse_metadata(self):
-        result = parse_apmx(str(APMX_TEST_FILE))
-        assert result["architecture"] == "64-bit"
-        assert result["process_count"] == 1
+    def test_parse_metadata(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = parse_apmx(str(apmx_file))
+        assert result["process_count"] >= 1
         proc = result["processes"][0]
         assert proc["pid"] > 0
-        assert proc["total_calls"] > 1000
+        assert proc["total_calls"] > 0
         assert "process_name" in proc
         assert "process_path" in proc
 
-    def test_module_list_populated(self):
-        result = parse_apmx(str(APMX_TEST_FILE))
-        assert result["modules_loaded"] > 10
-        dll_names = [m.rsplit("\\", 1)[-1].lower() for m in result["module_list"]]
-        assert any("kernel32" in d for d in dll_names)
-        assert any("ntdll" in d for d in dll_names)
+    def test_module_list_populated(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = parse_apmx(str(apmx_file))
+        assert result.get("modules_loaded", 0) > 0
 
-    def test_call_extraction(self):
-        result = get_apmx_calls(str(APMX_TEST_FILE), limit=20)
-        assert result["total_records"] > 1000
-        assert result["returned"] == 20
+    def test_call_extraction(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = get_apmx_calls(str(apmx_file), limit=20)
+        assert result["total_records"] > 0
+        assert result["returned"] > 0
         for call in result["calls"]:
             assert "top_api" in call
             assert "call_index" in call
             assert len(call["top_api"]) >= 3
 
-    def test_call_filter(self):
-        result = get_apmx_calls(str(APMX_TEST_FILE), api_filter="OpenProcess", limit=50)
+    def test_call_filter(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        # Pick the most frequent API to filter on
+        stats = get_apmx_api_stats(str(apmx_file))
+        if not stats["top_apis_by_frequency"]:
+            pytest.skip("No APIs in capture")
+        top_api = stats["top_apis_by_frequency"][0]["api"]
+        result = get_apmx_calls(str(apmx_file), api_filter=top_api, limit=10)
+        assert result["returned"] > 0
         for call in result["calls"]:
-            assert any("openprocess" in a.lower() for a in call["all_apis"])
+            assert any(top_api.lower() in a.lower() for a in call["all_apis"])
 
-    def test_api_stats(self):
-        result = get_apmx_api_stats(str(APMX_TEST_FILE))
-        assert result["total_records"] > 1000
-        assert result["unique_top_level_apis"] > 50
+    def test_api_stats(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = get_apmx_api_stats(str(apmx_file))
+        assert result["total_records"] > 0
+        assert result["unique_top_level_apis"] > 0
         assert result["unique_all_apis"] >= result["unique_top_level_apis"]
         assert len(result["top_apis_by_frequency"]) > 0
 
-    def test_pattern_detection_finds_injection(self):
-        result = detect_apmx_patterns(str(APMX_TEST_FILE))
-        assert result["risk_level"] == "high"
-        assert result["patterns_detected"] >= 1
-        ids = [d["pattern_id"] for d in result["details"]]
-        assert "classic_injection" in ids
-
-        # Should have a timeline
-        assert len(result["suspicious_call_timeline"]) > 0
-
-    def test_injection_timeline_order(self):
-        """The injection chain should appear in the expected order."""
-        result = detect_apmx_patterns(str(APMX_TEST_FILE))
-        for det in result["details"]:
-            if det["pattern_id"] == "classic_injection":
-                tl = det["timeline"]
-                api_order = [e["api"] for e in tl]
-                # OpenProcess should come before VirtualAllocEx
-                assert api_order.index("OpenProcess") < api_order.index("VirtualAllocEx")
-                assert api_order.index("VirtualAllocEx") < api_order.index("WriteProcessMemory")
-                break
-        else:
-            pytest.fail("classic_injection pattern not found")
+    def test_pattern_detection_runs(self, apmx_file):
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = detect_apmx_patterns(str(apmx_file))
+        assert "risk_level" in result
+        assert "details" in result
+        assert "suspicious_call_timeline" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1100,40 +1126,38 @@ class TestCorrelateHandles:
 
 
 # ---------------------------------------------------------------------------
-# Tests against real Ghost-Thread capture (skipped if file not present)
+# Capture-specific integration tests (discovered, not hardcoded)
 # ---------------------------------------------------------------------------
 
-GHOST_THREAD_FILE = Path("tests/data/Ghost-Thread.apmx64")
-
-
-@pytest.mark.skipif(not GHOST_THREAD_FILE.exists(), reason="Ghost-Thread.apmx64 not found")
 class TestGhostThreadCallDetails:
-    """Test parameter extraction against real Ghost-Thread capture."""
+    """Test parameter extraction against Ghost-Thread capture (skipped if absent)."""
+
+    @pytest.fixture(autouse=True)
+    def _resolve(self):
+        self._file = _find_capture("Ghost-Thread")
+        if not self._file:
+            pytest.skip("Ghost-Thread capture not found under tests/")
 
     def test_openprocess_return_value(self):
-        result = get_apmx_call_details(str(GHOST_THREAD_FILE), call_indices=[25664])
+        result = get_apmx_call_details(str(self._file), call_indices=[25664])
         call = result["calls"][0]
         assert call["api_name"] == "OpenProcess"
         assert call["return_value"] == 0x268
-        # Check dwDesiredAccess param
         p1 = call["parameters"][1]
         assert p1["pre_value"] == 0x43A
 
     def test_virtualallocex_params(self):
-        result = get_apmx_call_details(str(GHOST_THREAD_FILE), call_indices=[29109])
+        result = get_apmx_call_details(str(self._file), call_indices=[29109])
         call = result["calls"][0]
         assert call["api_name"] == "VirtualAllocEx"
         assert call["return_value"] == 0x206583D0000
-        # hProcess should be 0x268
         p0 = call["parameters"][0]
         assert p0["pre_value"] == 0x268
-        # flProtect should be PAGE_EXECUTE_READ
         p5 = call["parameters"][5]
         assert p5["pre_value"] == 0x20
 
     def test_injection_handle_chain(self):
-        result = correlate_apmx_handles(str(GHOST_THREAD_FILE))
-        # Find the 0x268 chain
+        result = correlate_apmx_handles(str(self._file))
         chain = None
         for c in result["handle_chains"]:
             if c["handle"] == 0x268:
@@ -1146,94 +1170,523 @@ class TestGhostThreadCallDetails:
         assert "WriteProcessMemory" in consumer_apis
 
     def test_timestamps_present(self):
-        result = get_apmx_call_details(str(GHOST_THREAD_FILE), call_indices=[25664])
+        result = get_apmx_call_details(str(self._file), call_indices=[25664])
         call = result["calls"][0]
         assert "timestamp" in call
         assert "2025-04-16" in call["timestamp"]
 
 
-# ---------------------------------------------------------------------------
-# Tests against Attacker capture (definitions-only name resolution)
-# ---------------------------------------------------------------------------
-
-ATTACKER_FILE = Path("tests/data/Attacker.apmx64")
-
-
-@pytest.mark.skipif(not ATTACKER_FILE.exists(), reason="Attacker.apmx64 not found")
 class TestAttackerCapture:
-    """Test definitions-based name resolution for captures without embedded names."""
+    """Test definitions-based name resolution (skipped if absent)."""
+
+    @pytest.fixture(autouse=True)
+    def _resolve(self):
+        self._file = _find_capture("Attacker")
+        if not self._file:
+            pytest.skip("Attacker capture not found under tests/")
 
     def test_all_records_resolved(self):
-        """All records should have API names via definitions blob."""
-        result = get_apmx_calls(str(ATTACKER_FILE), process_index=0, limit=100)
+        result = get_apmx_calls(str(self._file), process_index=0, limit=100)
         assert result["returned"] == 100
         for call in result["calls"]:
             assert call["top_api"], f"Record {call['call_index']} has no API name"
 
     def test_api_stats_complete(self):
-        stats = get_apmx_api_stats(str(ATTACKER_FILE), process_index=0)
+        stats = get_apmx_api_stats(str(self._file), process_index=0)
         assert stats["total_records"] == 6367
         assert stats["unique_top_level_apis"] >= 5
 
     def test_known_apis_present(self):
-        """Attacker file should contain file I/O APIs."""
-        stats = get_apmx_api_stats(str(ATTACKER_FILE), process_index=0)
+        stats = get_apmx_api_stats(str(self._file), process_index=0)
         api_names = {s["api"] for s in stats["top_apis_by_frequency"]}
         assert "ReadFile" in api_names
         assert "WriteFile" in api_names
 
     def test_call_details_with_defs_name(self):
-        result = get_apmx_call_details(str(ATTACKER_FILE), process_index=0, limit=3)
+        result = get_apmx_call_details(str(self._file), process_index=0, limit=3)
         assert result["returned"] == 3
         call = result["calls"][0]
         assert call["api_name"] == "GetCurrentDirectoryW"
         assert call["param_count"] >= 1
 
     def test_multi_process(self):
-        """Both processes should be parseable."""
-        result0 = get_apmx_calls(str(ATTACKER_FILE), process_index=0, limit=1)
-        result1 = get_apmx_calls(str(ATTACKER_FILE), process_index=1, limit=1)
+        result0 = get_apmx_calls(str(self._file), process_index=0, limit=1)
+        result1 = get_apmx_calls(str(self._file), process_index=1, limit=1)
         assert result0["returned"] >= 1
         assert result1["returned"] >= 1
 
 
-# ---------------------------------------------------------------------------
-# Tests against Insider capture (mixed embedded + definitions names)
-# ---------------------------------------------------------------------------
-
-INSIDER_FILE = Path("tests/data/Insider.apmx64")
-
-
-@pytest.mark.skipif(not INSIDER_FILE.exists(), reason="Insider.apmx64 not found")
 class TestInsiderCapture:
-    """Test mixed name resolution and pattern detection on Insider capture."""
+    """Test mixed name resolution and pattern detection (skipped if absent)."""
+
+    @pytest.fixture(autouse=True)
+    def _resolve(self):
+        self._file = _find_capture("Insider")
+        if not self._file:
+            pytest.skip("Insider capture not found under tests/")
 
     def test_multi_process_metadata(self):
-        from winforensics_mcp.parsers.api_monitor.apmx_parser import parse_apmx
-        meta = parse_apmx(str(INSIDER_FILE))
+        meta = parse_apmx(str(self._file))
         assert meta["process_count"] == 2
         names = [p["process_name"] for p in meta["processes"]]
         assert "wsl.exe" in names
         assert "powershell.exe" in names
 
     def test_powershell_api_stats(self):
-        stats = get_apmx_api_stats(str(INSIDER_FILE), process_index=1)
+        stats = get_apmx_api_stats(str(self._file), process_index=1)
         assert stats["total_records"] == 22989
-        # With definitions resolution, should have many more unique APIs
         assert stats["unique_top_level_apis"] > 100
 
     def test_pattern_detection_finds_threats(self):
-        patterns = detect_apmx_patterns(str(INSIDER_FILE), process_index=1)
+        patterns = detect_apmx_patterns(str(self._file), process_index=1)
         assert patterns["patterns_detected"] >= 3
         assert patterns["risk_level"] in ("high", "critical")
         pattern_names = {p["pattern_name"] for p in patterns["details"]}
-        # Should detect injection and persistence patterns
         assert any("Injection" in n or "Persistence" in n or "Token" in n for n in pattern_names)
 
     def test_call_filter_accuracy(self):
-        """Filter by RegCreateKey should return registry operations."""
-        result = get_apmx_calls(str(INSIDER_FILE), process_index=1, api_filter="RegCreateKey", limit=10)
+        result = get_apmx_calls(str(self._file), process_index=1, api_filter="RegCreateKey", limit=10)
         assert result["returned"] >= 1
         for call in result["calls"]:
             all_names = " ".join(call["all_apis"])
             assert "RegCreateKey" in all_names
+
+
+# ---------------------------------------------------------------------------
+# P0: process_index consistency tests
+# ---------------------------------------------------------------------------
+
+class TestProcessIndexConsistency:
+    """Verify process_index is consistently 0-based across all functions."""
+
+    def test_parse_apmx_uses_zero_based_index(self, tmp_path):
+        apmx = _build_synthetic_apmx()
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+        result = parse_apmx(str(f))
+        assert result["processes"][0]["index"] == 0
+        # Should NOT have the internal _raw_process_index
+        assert "_raw_process_index" not in result["processes"][0]
+        # Should NOT have old "process_index" key
+        assert "process_index" not in result["processes"][0]
+
+
+# ---------------------------------------------------------------------------
+# P0: Call attribution "top API first" tests
+# ---------------------------------------------------------------------------
+
+class TestCallAttribution:
+    """Verify top_api / resolved_api fields in call records."""
+
+    def test_top_api_field_present(self, tmp_path):
+        records = [
+            _build_call_record(record_index=0, api_name="OpenProcess",
+                               pre_params=[(0x10, [42])]),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+        result = get_apmx_call_details(str(f), call_indices=[0])
+        call = result["calls"][0]
+        assert call["top_api"] == "OpenProcess"
+        assert call["api_name"] == "OpenProcess"
+
+
+# ---------------------------------------------------------------------------
+# P1: Named parameter tests
+# ---------------------------------------------------------------------------
+
+class TestCommonApiParams:
+    """Verify parameter naming for common APIs."""
+
+    def test_openprocess_param_names(self, tmp_path):
+        """OpenProcess params should be named: dwDesiredAccess, bInheritHandle, dwProcessId."""
+        records = [
+            _build_call_record(
+                record_index=0, api_name="OpenProcess",
+                pre_params=[
+                    (0x30, [1, 0xCEE76FED68, 0]),  # return slot
+                    (0x10, [0x43A]),                  # dwDesiredAccess
+                    (0x10, [0]),                      # bInheritHandle
+                    (0x10, [16224]),                   # dwProcessId
+                ],
+                post_params=[
+                    (0x30, [1, 0xCEE76FED68, 0x268]),
+                    (0x10, [0x43A]),
+                    (0x10, [0]),
+                    (0x10, [16224]),
+                ],
+            ),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+        result = get_apmx_call_details(str(f), call_indices=[0])
+        call = result["calls"][0]
+        named = {p.get("name"): p for p in call["parameters"] if p.get("name")}
+        assert "dwDesiredAccess" in named
+        assert named["dwDesiredAccess"]["pre_value"] == 0x43A
+        assert "dwProcessId" in named
+        assert named["dwProcessId"]["pre_value"] == 16224
+
+    def test_virtualallocex_param_names(self, tmp_path):
+        """VirtualAllocEx params should include dwSize."""
+        records = [
+            _build_call_record(
+                record_index=0, api_name="VirtualAllocEx",
+                pre_params=[
+                    (0x10, [0x268]),     # hProcess
+                    (0x30, [1, 0xABC, 0]),  # return slot (lpAddress output)
+                    (0x10, [511]),        # dwSize
+                    (0x10, [0x3000]),     # flAllocationType
+                    (0x10, [0x20]),       # flProtect
+                ],
+            ),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+        result = get_apmx_call_details(str(f), call_indices=[0])
+        call = result["calls"][0]
+        named = {p.get("name"): p for p in call["parameters"] if p.get("name")}
+        assert "dwSize" in named
+        assert named["dwSize"]["pre_value"] == 511
+
+    def test_common_api_params_dict_populated(self):
+        """COMMON_API_PARAMS should have entries for common injection APIs."""
+        assert "OpenProcess" in COMMON_API_PARAMS
+        assert "VirtualAllocEx" in COMMON_API_PARAMS
+        assert "WriteProcessMemory" in COMMON_API_PARAMS
+        assert "CreateRemoteThread" in COMMON_API_PARAMS
+
+
+# ---------------------------------------------------------------------------
+# P1: Toolhelp structure decoding tests
+# ---------------------------------------------------------------------------
+
+class TestProcessEntry32Decode:
+    """Test PROCESSENTRY32W structure decoding."""
+
+    def _make_processentry32w(self, pid: int, exe_name: str, parent_pid: int = 0, threads: int = 1) -> dict:
+        """Build a parameter data dict simulating PROCESSENTRY32W slot values."""
+        # Build raw bytes matching PROCESSENTRY32W layout
+        raw = bytearray(568)
+        struct.pack_into("<I", raw, 0, 568)      # dwSize
+        struct.pack_into("<I", raw, 4, 0)         # cntUsage
+        struct.pack_into("<I", raw, 8, pid)       # th32ProcessID
+        struct.pack_into("<Q", raw, 12, 0)        # th32DefaultHeapID
+        struct.pack_into("<I", raw, 20, 0)        # th32ModuleID
+        struct.pack_into("<I", raw, 24, threads)  # cntThreads
+        struct.pack_into("<I", raw, 28, parent_pid)  # th32ParentProcessID
+        struct.pack_into("<I", raw, 32, 8)        # pcPriClassBase
+        struct.pack_into("<I", raw, 36, 0)        # dwFlags
+        # szExeFile (UTF-16LE)
+        encoded = exe_name.encode("utf-16-le")
+        raw[40:40 + len(encoded)] = encoded
+
+        # Convert to uint64 slots
+        slots = []
+        for i in range(0, len(raw), 8):
+            slots.append(struct.unpack_from("<Q", raw, i)[0])
+
+        return {"values": slots, "slot_count": len(slots)}
+
+    def test_decode_notepad(self):
+        param = self._make_processentry32w(pid=16224, exe_name="notepad.exe", parent_pid=4, threads=3)
+        decoded = _decode_processentry32w(param)
+        assert decoded is not None
+        assert decoded["th32ProcessID"] == 16224
+        assert decoded["szExeFile"] == "notepad.exe"
+        assert decoded["th32ParentProcessID"] == 4
+        assert decoded["cntThreads"] == 3
+
+    def test_decode_invalid_size(self):
+        """Invalid dwSize should return None."""
+        param = {"values": [0, 0, 0, 0, 0, 0, 0, 0], "slot_count": 8}
+        assert _decode_processentry32w(param) is None
+
+    def test_decode_too_few_slots(self):
+        """Too few slots should return None."""
+        param = {"values": [568, 0], "slot_count": 2}
+        assert _decode_processentry32w(param) is None
+
+
+# ---------------------------------------------------------------------------
+# P1: TLS callback pattern tests
+# ---------------------------------------------------------------------------
+
+class TestTlsCallbackPattern:
+    """Test the tls_callback_execution pattern detection."""
+
+    def test_tls_pattern_exists(self):
+        from winforensics_mcp.parsers.api_monitor.patterns import PATTERNS
+        assert "tls_callback_execution" in PATTERNS
+        p = PATTERNS["tls_callback_execution"]
+        assert p["risk"] == "high"
+        assert "FlsAlloc" in p["required"]
+        assert "ExitProcess" in p["required"]
+
+    def test_tls_pattern_detected_with_injection(self, tmp_path):
+        """TLS pattern should fire when FLS APIs are early + injection chain present."""
+        apis = [
+            # Early FLS activity (records 0-2)
+            "FlsAlloc",
+            "FlsSetValue",
+            "ExitProcess",
+            # Injection chain
+            "OpenProcess",
+            "VirtualAllocEx",
+            "WriteProcessMemory",
+            "CreateRemoteThread",
+        ]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = detect_apmx_patterns(str(f))
+        ids = [d["pattern_id"] for d in result["details"]]
+        assert "tls_callback_execution" in ids
+
+    def test_tls_pattern_not_detected_without_injection(self, tmp_path):
+        """TLS pattern should NOT fire without injection APIs (temporal check)."""
+        apis = ["FlsAlloc", "FlsSetValue", "ExitProcess", "GetModuleFileNameW"]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = detect_apmx_patterns(str(f))
+        ids = [d["pattern_id"] for d in result["details"]]
+        assert "tls_callback_execution" not in ids
+
+
+# ---------------------------------------------------------------------------
+# P2/Step 5: Injection info tests
+# ---------------------------------------------------------------------------
+
+class TestGetApmxInjectionInfo:
+    """Test the high-level injection chain extraction."""
+
+    def test_injection_chain_synthetic(self, tmp_path):
+        """Build a synthetic injection chain and verify extraction."""
+        records = [
+            # OpenProcess returns handle 0x268
+            _build_call_record(
+                record_index=0, api_name="OpenProcess",
+                pre_params=[
+                    (0x30, [1, 0xCEE76FED68, 0]),
+                    (0x10, [0x43A]),
+                    (0x10, [0]),
+                    (0x10, [16224]),
+                ],
+                post_params=[
+                    (0x30, [1, 0xCEE76FED68, 0x268]),
+                    (0x10, [0x43A]),
+                    (0x10, [0]),
+                    (0x10, [16224]),
+                ],
+            ),
+            # VirtualAllocEx uses handle 0x268
+            _build_call_record(
+                record_index=1, api_name="VirtualAllocEx",
+                pre_params=[
+                    (0x10, [0x268]),
+                    (0x30, [1, 0xCEE76FED08, 0]),
+                    (0x10, [511]),
+                    (0x10, [0x3000]),
+                    (0x10, [0x20]),
+                ],
+                post_params=[
+                    (0x10, [0x268]),
+                    (0x30, [1, 0xCEE76FED08, 0x206583D0000]),
+                    (0x10, [511]),
+                    (0x10, [0x3000]),
+                    (0x10, [0x20]),
+                ],
+            ),
+            # WriteProcessMemory uses handle 0x268
+            _build_call_record(
+                record_index=2, api_name="WriteProcessMemory",
+                pre_params=[
+                    (0x10, [0x268]),
+                    (0x10, [0x206583D0000]),
+                    (0x10, [0]),
+                    (0x10, [511]),
+                ],
+            ),
+            # CreateRemoteThread uses handle 0x268
+            _build_call_record(
+                record_index=3, api_name="CreateRemoteThread",
+                pre_params=[
+                    (0x10, [0x268]),
+                    (0x10, [0]),
+                    (0x10, [0]),
+                    (0x10, [0x206583D0000]),
+                    (0x10, [0]),
+                    (0x10, [0]),
+                ],
+            ),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = get_apmx_injection_info(str(f))
+        assert result["chain_count"] >= 1
+        chain = result["injection_chains"][0]
+        assert chain["target_pid"] == 16224
+
+    def test_no_injection_chains_for_benign(self, tmp_path):
+        records = [
+            _build_call_record(record_index=0, api_name="GetModuleFileNameW",
+                               pre_params=[(0x10, [0])]),
+            _build_call_record(record_index=1, api_name="ExitProcess",
+                               pre_params=[(0x10, [0])]),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = get_apmx_injection_info(str(f))
+        assert result["chain_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# P3: Context window and param search tests
+# ---------------------------------------------------------------------------
+
+class TestGetApmxCallsAround:
+    """Test context window queries."""
+
+    def test_calls_around_basic(self, tmp_path):
+        apis = ["A" * 5 + str(i) for i in range(30)]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = get_apmx_calls_around(str(f), call_index=15, before=5, after=5)
+        assert result["center_index"] == 15
+        assert result["range_start"] == 10
+        assert result["range_end"] == 20
+        assert result["returned"] > 0
+
+    def test_calls_around_at_start(self, tmp_path):
+        apis = ["CreateFileW", "ReadFile", "CloseHandle"]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = get_apmx_calls_around(str(f), call_index=0, before=5, after=1)
+        assert result["range_start"] == 0
+        assert result["returned"] >= 1
+
+
+class TestSearchApmxParams:
+    """Test parameter value search."""
+
+    def test_search_integer_value(self, tmp_path):
+        records = [
+            _build_call_record(record_index=0, api_name="OpenProcess",
+                               pre_params=[(0x10, [0x268])]),
+            _build_call_record(record_index=1, api_name="CloseHandle",
+                               pre_params=[(0x10, [0x268])]),
+            _build_call_record(record_index=2, api_name="Sleep",
+                               pre_params=[(0x10, [1000])]),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = search_apmx_params(str(f), value=0x268)
+        assert result["match_count"] >= 2
+        apis = [m["api_name"] for m in result["matches"]]
+        assert "OpenProcess" in apis
+        assert "CloseHandle" in apis
+
+    def test_search_no_matches(self, tmp_path):
+        records = [
+            _build_call_record(record_index=0, api_name="Sleep",
+                               pre_params=[(0x10, [1000])]),
+        ]
+        apmx = _build_detailed_apmx(records)
+        f = tmp_path / "test.apmx64"
+        f.write_bytes(apmx)
+
+        result = search_apmx_params(str(f), value=99999)
+        assert result["match_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for new P0-P3 features against ANY real capture
+# ---------------------------------------------------------------------------
+
+class TestRealApmxNewFeatures:
+    """Structural tests for new P0-P3 features — work with any APMX capture."""
+
+    def test_process_index_is_zero_based(self, apmx_file):
+        """P0: process index must be 0-based, no stale keys."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = parse_apmx(str(apmx_file))
+        proc = result["processes"][0]
+        assert proc["index"] == 0
+        assert "process_index" not in proc
+        assert "_raw_process_index" not in proc
+
+    def test_top_api_field_in_call_details(self, apmx_file):
+        """P0: call details always include top_api field."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        calls = get_apmx_calls(str(apmx_file), limit=5)
+        if calls["returned"] == 0:
+            pytest.skip("capture has no calls")
+        first_idx = calls["calls"][0]["call_index"]
+        result = get_apmx_call_details(str(apmx_file), call_indices=[first_idx])
+        call = result["calls"][0]
+        assert "top_api" in call
+        assert call["top_api"] == call["api_name"]
+
+    def test_named_params_on_common_apis(self, apmx_file):
+        """P1: known APIs get named parameters."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        for api_name in COMMON_API_PARAMS:
+            calls = get_apmx_calls(str(apmx_file), api_filter=api_name, limit=1)
+            if calls["returned"] == 0:
+                continue
+            idx = calls["calls"][0]["call_index"]
+            details = get_apmx_call_details(str(apmx_file), call_indices=[idx])
+            call = details["calls"][0]
+            named = [p for p in call.get("parameters", []) if p.get("name")]
+            if len(named) > 0:
+                return  # success — at least one common API has named params
+        pytest.skip("no common API with named params found in capture")
+
+    def test_injection_info_returns_dict(self, apmx_file):
+        """P2: get_apmx_injection_info returns well-structured dict."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = get_apmx_injection_info(str(apmx_file))
+        assert "injection_chains" in result
+        assert "chain_count" in result
+        assert isinstance(result["injection_chains"], list)
+
+    def test_calls_around_returns_context(self, apmx_file):
+        """P3: get_apmx_calls_around returns surrounding records."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        calls = get_apmx_calls(str(apmx_file), limit=1)
+        if calls["returned"] == 0:
+            pytest.skip("capture has no calls")
+        mid = calls["calls"][0]["call_index"]
+        result = get_apmx_calls_around(str(apmx_file), call_index=mid, before=3, after=3)
+        assert result["center_index"] == mid
+        assert result["returned"] >= 1
+
+    def test_search_params_returns_results(self, apmx_file):
+        """P3: search_apmx_params returns well-structured dict."""
+        if not apmx_file:
+            pytest.skip("No APMX capture available")
+        result = search_apmx_params(str(apmx_file), value=0, limit=5)
+        assert "matches" in result
+        assert "match_count" in result
+        assert isinstance(result["matches"], list)

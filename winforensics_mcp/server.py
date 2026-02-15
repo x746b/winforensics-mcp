@@ -80,6 +80,9 @@ from .parsers import (
     detect_apmx_patterns,
     get_apmx_call_details,
     correlate_apmx_handles,
+    get_apmx_injection_info,
+    get_apmx_calls_around,
+    search_apmx_params,
     API_DB_AVAILABLE,
 )
 
@@ -1121,6 +1124,100 @@ async def list_tools() -> list[Tool]:
                         },
                     },
                     "required": ["file_path"],
+                },
+            )
+        )
+
+        tools.append(
+            Tool(
+                name="apmx_injection_info",
+                description="Extract enriched injection chain details from an APMX capture. "
+                           "Returns target PID, target process name, shellcode size (requested vs aligned), "
+                           "start address, and injection technique label. Wraps handle correlation with "
+                           "parameter decoding for a forensic-friendly summary.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to analyze (0 = first/only process)",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="apmx_calls_around",
+                description="Get a context window of API calls around a specific record index. "
+                           "Returns detailed call records in the range [call_index-before, call_index+after]. "
+                           "Useful for understanding what happened immediately before and after a suspicious call.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "call_index": {
+                            "type": "integer",
+                            "description": "The center record index to look around",
+                        },
+                        "before": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Number of records before the target to include",
+                        },
+                        "after": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Number of records after the target to include",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to read (0 = first/only process)",
+                        },
+                    },
+                    "required": ["file_path", "call_index"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="apmx_search_params",
+                description="Search API calls by parameter value in an APMX capture. "
+                           "Finds all calls where a specific integer (e.g., PID, handle, size) or "
+                           "string appears as a parameter value. Returns matching calls with the "
+                           "matched parameters highlighted.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to .apmx64 or .apmx86 capture file",
+                        },
+                        "value": {
+                            "description": "Integer or string value to search for in parameters",
+                        },
+                        "process_index": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Which process to search (0 = first/only process)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 50,
+                            "description": "Maximum number of matching calls to return",
+                        },
+                    },
+                    "required": ["file_path", "value"],
                 },
             )
         )
@@ -2262,6 +2359,57 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             return json_response({"error": str(e)})
         except Exception as e:
             return json_response({"error": f"APMX handle correlation failed: {e}"})
+
+    elif name == "apmx_injection_info":
+        try:
+            result = get_apmx_injection_info(
+                file_path=args["file_path"],
+                process_index=args.get("process_index", 0),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX injection info failed: {e}"})
+
+    elif name == "apmx_calls_around":
+        try:
+            result = get_apmx_calls_around(
+                file_path=args["file_path"],
+                call_index=args["call_index"],
+                before=args.get("before", 10),
+                after=args.get("after", 10),
+                process_index=args.get("process_index", 0),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX calls around failed: {e}"})
+
+    elif name == "apmx_search_params":
+        try:
+            value = args["value"]
+            # Try to convert to int if it looks numeric
+            if isinstance(value, str):
+                try:
+                    if value.startswith("0x"):
+                        value = int(value, 16)
+                    elif value.isdigit():
+                        value = int(value)
+                except (ValueError, OverflowError):
+                    pass
+            result = search_apmx_params(
+                file_path=args["file_path"],
+                value=value,
+                process_index=args.get("process_index", 0),
+                limit=args.get("limit", 50),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except Exception as e:
+            return json_response({"error": f"APMX param search failed: {e}"})
 
     elif name == "disk_parse_prefetch":
         if not PYSCCA_AVAILABLE:
