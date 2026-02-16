@@ -94,7 +94,13 @@ source ~/.bashrc
 python3 --version
 ```
 
-### Install
+### Install from PyPI
+
+```bash
+uv pip install winforensics-mcp[all]
+```
+
+### Install from source
 
 ```bash
 git clone https://github.com/x746b/winforensics-mcp.git
