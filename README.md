@@ -125,6 +125,14 @@ uv run python -m winforensics_mcp.server
 
 ## Adding to Claude CLI
 
+Installed from PyPI
+
+```bash
+claude mcp add winforensics-mcp --scope user -- uv run winforensics-mcp
+```
+
+Installed from sources
+
 ```bash
 claude mcp add winforensics-mcp \
   --scope user \
