@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -2072,7 +2073,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         if not VT_AVAILABLE:
             return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
         try:
-            result = vt_lookup_hash(args["file_hash"])
+            result = await asyncio.to_thread(vt_lookup_hash, args["file_hash"])
             return json_response(result)
         except ValueError as e:
             return json_response({"error": str(e)})
@@ -2083,7 +2084,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         if not VT_AVAILABLE:
             return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
         try:
-            result = vt_lookup_ip(args["ip_address"])
+            result = await asyncio.to_thread(vt_lookup_ip, args["ip_address"])
             return json_response(result)
         except ValueError as e:
             return json_response({"error": str(e)})
@@ -2094,7 +2095,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         if not VT_AVAILABLE:
             return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
         try:
-            result = vt_lookup_domain(args["domain"])
+            result = await asyncio.to_thread(vt_lookup_domain, args["domain"])
             return json_response(result)
         except ValueError as e:
             return json_response({"error": str(e)})
@@ -2105,7 +2106,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         if not VT_AVAILABLE:
             return json_response({"error": "vt-py library not installed. Install with: pip install vt-py"})
         try:
-            result = vt_lookup_file(args["file_path"])
+            result = await asyncio.to_thread(vt_lookup_file, args["file_path"])
             return json_response(result)
         except ValueError as e:
             return json_response({"error": str(e)})
