@@ -97,7 +97,7 @@ python3 --version
 ### Install from PyPI
 
 ```bash
-uv tool install winforensics-mcp[all]
+uv tool install winforensics-mcp
 ```
 
 ### Install from source
