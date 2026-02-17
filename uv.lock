@@ -1995,7 +1995,7 @@ wheels = [
 
 [[package]]
 name = "winforensics-mcp"
-version = "0.5.0"
+version = "1.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "libesedb-python" },
