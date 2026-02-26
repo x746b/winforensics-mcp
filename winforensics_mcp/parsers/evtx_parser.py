@@ -545,6 +545,118 @@ def search_security_events(
     return get_evtx_events(evtx_path, event_ids=event_ids, limit=limit, offset=offset)
 
 
+def evtx_attack_summary(
+    evtx_path: str | Path,
+    event_type: str = "process_creation",
+    contains: Optional[Sequence[str]] = None,
+    not_contains: Optional[Sequence[str]] = None,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """
+    Return a compact, TSV-formatted summary of security events.
+
+    Unlike evtx_security_search which returns full JSON per event, this returns
+    one tab-separated line per event with only the attack-relevant columns.
+    Designed for rapid triage — fits an entire attack chain in a single call.
+
+    Supported event_type values and their columns:
+        process_creation: Timestamp | User | ParentProcess | CommandLine
+        logon:            Timestamp | User | SourceIP | LogonType
+        account_created:  Timestamp | NewUser | CreatedBy
+        scheduled_task:   Timestamp | TaskName | Action | EventID
+        service_installed: Timestamp | ServiceName | ImagePath | ServiceType
+    """
+    # Map event types to Event IDs and field extractors
+    type_config: dict[str, dict[str, Any]] = {
+        "process_creation": {
+            "event_ids": [4688],
+            "header": "Timestamp\tUser\tParentProcess\tCommandLine",
+            "fields": lambda ed: (
+                ed.get("TargetUserName") or ed.get("SubjectUserName", "?"),
+                _basename(ed.get("ParentProcessName", "?")),
+                ed.get("CommandLine", "?"),
+            ),
+        },
+        "logon": {
+            "event_ids": [4624],
+            "header": "Timestamp\tUser\tSourceIP\tLogonType",
+            "fields": lambda ed: (
+                ed.get("TargetUserName", "?"),
+                ed.get("IpAddress", "?"),
+                ed.get("LogonType", "?"),
+            ),
+        },
+        "account_created": {
+            "event_ids": [4720],
+            "header": "Timestamp\tNewUser\tCreatedBy",
+            "fields": lambda ed: (
+                ed.get("TargetUserName", "?"),
+                ed.get("SubjectUserName", "?"),
+            ),
+        },
+        "scheduled_task": {
+            "event_ids": [4698, 4699, 4700, 4701, 4702],
+            "header": "Timestamp\tTaskName\tAction\tEventID",
+            "fields": lambda ed: (
+                ed.get("TaskName", "?"),
+                ed.get("TaskContent", ed.get("Data_0", "?"))[:120],
+            ),
+            "include_event_id": True,
+        },
+        "service_installed": {
+            "event_ids": [4697, 7045],
+            "header": "Timestamp\tServiceName\tImagePath\tServiceType",
+            "fields": lambda ed: (
+                ed.get("ServiceName", "?"),
+                ed.get("ImagePath", ed.get("ServiceFileName", "?")),
+                ed.get("ServiceType", "?"),
+            ),
+        },
+    }
+
+    config = type_config.get(event_type.lower())
+    if not config:
+        available = ", ".join(type_config.keys())
+        raise ValueError(f"Unknown event type: {event_type}. Available: {available}")
+
+    lines = [config["header"]]
+    total = 0
+
+    for event in iter_evtx_events(
+        evtx_path,
+        event_ids=config["event_ids"],
+        contains=contains,
+        not_contains=not_contains,
+    ):
+        total += 1
+        if total > limit:
+            break
+
+        ts = event.get("TimeCreated", "?")
+        ed = event.get("EventData", {})
+        cols = config["fields"](ed)
+
+        if config.get("include_event_id"):
+            cols = (*cols, str(event.get("EventID", "?")))
+
+        lines.append(f"{ts}\t" + "\t".join(str(c) for c in cols))
+
+    return {
+        "format": "tsv",
+        "event_type": event_type,
+        "total_events": min(total, limit),
+        "truncated": total > limit,
+        "data": "\n".join(lines),
+    }
+
+
+def _basename(path: str) -> str:
+    """Extract filename from a Windows path."""
+    if not path or path == "?":
+        return path
+    return path.rsplit("\\", 1)[-1]
+
+
 def get_event_id_description(event_id: int, channel: str = "Security") -> str:
     """Get human-readable description for an Event ID"""
     channel_events = IMPORTANT_EVENT_IDS.get(channel, {})

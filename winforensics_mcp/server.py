@@ -16,6 +16,7 @@ from .parsers import (
     list_evtx_files,
     get_evtx_stats,
     search_security_events,
+    evtx_attack_summary,
     get_event_id_description,
     get_registry_key,
     search_registry_values,
@@ -323,6 +324,26 @@ async def list_tools() -> list[Tool]:
                     "offset": {"type": "integer", "default": 0, "description": "Skip first N matches for pagination"},
                 },
                 "required": ["evtx_path", "event_type"],
+            },
+        ),
+        Tool(
+            name="evtx_attack_summary",
+            description="Compact TSV summary of security events for rapid triage. Returns one tab-separated line per event with only attack-relevant columns. Fits entire attack chains in a single call. Types: process_creation (Timestamp|User|ParentProcess|CommandLine), logon (Timestamp|User|SourceIP|LogonType), account_created (Timestamp|NewUser|CreatedBy), scheduled_task, service_installed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "evtx_path": {"type": "string"},
+                    "event_type": {
+                        "type": "string",
+                        "enum": ["process_creation", "logon", "account_created",
+                                "scheduled_task", "service_installed"],
+                        "default": "process_creation",
+                    },
+                    "contains": {"type": "array", "items": {"type": "string"}, "description": "Only events containing ALL these strings (case-insensitive)"},
+                    "not_contains": {"type": "array", "items": {"type": "string"}, "description": "Exclude events containing ANY of these strings"},
+                    "limit": {"type": "integer", "default": 500, "description": "Max events (default 500)"},
+                },
+                "required": ["evtx_path"],
             },
         ),
         Tool(
@@ -1965,6 +1986,16 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         )
         return json_response(result)
     
+    elif name == "evtx_attack_summary":
+        result = evtx_attack_summary(
+            args["evtx_path"],
+            event_type=args.get("event_type", "process_creation"),
+            contains=args.get("contains"),
+            not_contains=args.get("not_contains"),
+            limit=args.get("limit", 500),
+        )
+        return json_response(result)
+
     elif name == "evtx_explain_event_id":
         desc = get_event_id_description(args["event_id"], args.get("channel", "Security"))
         return json_response({"event_id": args["event_id"], "description": desc})
