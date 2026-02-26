@@ -318,6 +318,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 | `evtx_get_stats` | Get event counts, time range, Event ID distribution |
 | `evtx_search` | Search with filters (time, Event ID, keywords) |
 | `evtx_security_search` | Pre-built security event searches (logon, process creation, etc.) |
+| `evtx_attack_summary` | Compact TSV summary for rapid triage - one line per event, attack-relevant columns only |
 | `evtx_explain_event_id` | Get Event ID description |
 
 ### Registry

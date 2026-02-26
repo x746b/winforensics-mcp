@@ -64,6 +64,7 @@ Only after orchestrators show HIGH confidence and you need specific details:
 | `disk_parse_usn_journal` | Deleted files, file operation history |
 | `evtx_security_search` | Specific security events (logon, process_creation, lateral_movement) |
 | `evtx_search` | Custom event log queries with filters |
+| `evtx_attack_summary` | Compact TSV summary for rapid triage — one line per event with attack-relevant columns only. Types: process_creation, logon, account_created, scheduled_task, service_installed |
 | `registry_get_persistence` | Malware persistence (Run keys, services) |
 | `registry_get_system_info` | OS version, hostname, timezone |
 | `file_analyze_pe` | Binary analysis (hashes, imports, exports, packers) |
@@ -135,6 +136,27 @@ hunt_ioc(
     yara_scan=True  # Scans file with 700+ YARA rules if found
 )
 # Returns: artifact presence + YARA malware signatures in one call
+```
+
+### Scenario 3b: Rapid Attack Chain Triage
+```
+# Get compact TSV of all process creation events — one line per event
+evtx_attack_summary(
+    evtx_path="/case/C/Windows/System32/winevt/Logs/Security.evtx",
+    event_type="process_creation",
+    contains=["powershell"],
+    not_contains=["svchost"],
+    limit=500
+)
+# Returns TSV: Timestamp | User | ParentProcess | CommandLine
+# Fits entire attack chain in a single call with minimal tokens
+
+# Check for suspicious logons
+evtx_attack_summary(
+    evtx_path="/case/C/Windows/System32/winevt/Logs/Security.evtx",
+    event_type="logon"
+)
+# Returns TSV: Timestamp | User | SourceIP | LogonType
 ```
 
 ### Scenario 4: Threat Intelligence Enrichment
