@@ -31,6 +31,90 @@ from ..config import (
 )
 
 
+# ---------------------------------------------------------------------------
+# In-memory EVTX cache
+# ---------------------------------------------------------------------------
+# After first parse of an EVTX file, stores all parsed events so subsequent
+# queries skip file I/O and json.loads entirely.  Keyed by (path, size, mtime).
+# LRU eviction when cache exceeds MAX_CACHE_FILES.
+
+MAX_CACHE_FILES = 10  # max distinct EVTX files to keep cached
+
+class _EvtxCacheEntry:
+    __slots__ = ("events", "raw_strings", "total_events")
+
+    def __init__(self, events: list[dict[str, Any]], raw_strings: list[str], total_events: int):
+        self.events = events          # parsed event_data dicts
+        self.raw_strings = raw_strings  # raw JSON strings (for contains/not_contains)
+        self.total_events = total_events
+
+
+# OrderedDict for LRU: key = (resolved_path, file_size, file_mtime)
+from collections import OrderedDict
+_evtx_cache: OrderedDict[tuple, _EvtxCacheEntry] = OrderedDict()
+
+
+def _cache_key(evtx_path: Path) -> tuple:
+    """Return cache key based on resolved path + mtime + size."""
+    stat = evtx_path.stat()
+    return (str(evtx_path.resolve()), stat.st_size, stat.st_mtime)
+
+
+def _get_cached(evtx_path: Path) -> Optional[_EvtxCacheEntry]:
+    """Return cached entry if valid, or None. Moves to end for LRU."""
+    key = _cache_key(evtx_path)
+    entry = _evtx_cache.get(key)
+    if entry is not None:
+        _evtx_cache.move_to_end(key)
+    return entry
+
+
+def _put_cache(evtx_path: Path, entry: _EvtxCacheEntry) -> None:
+    """Store cache entry with LRU eviction."""
+    key = _cache_key(evtx_path)
+    _evtx_cache[key] = entry
+    _evtx_cache.move_to_end(key)
+    while len(_evtx_cache) > MAX_CACHE_FILES:
+        _evtx_cache.popitem(last=False)
+
+
+def evtx_clear_cache() -> int:
+    """Clear the EVTX cache. Returns number of entries cleared."""
+    count = len(_evtx_cache)
+    _evtx_cache.clear()
+    return count
+
+
+def _populate_cache(evtx_path: Path, max_scan: int) -> _EvtxCacheEntry:
+    """Parse an EVTX file and store all events in cache."""
+    events: list[dict[str, Any]] = []
+    raw_strings: list[str] = []
+    scanned = 0
+
+    parser = _evtx_rust.PyEvtxParser(str(evtx_path))
+    for record in parser.records_json():
+        if isinstance(record, Exception):
+            continue
+        scanned += 1
+        if scanned > max_scan:
+            break
+
+        data_str = record["data"]
+        try:
+            event_dict = json.loads(data_str)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        event_data = extract_event_data_json(event_dict)
+        events.append(event_data)
+        raw_strings.append(data_str)
+
+    entry = _EvtxCacheEntry(events, raw_strings, len(events))
+    _put_cache(evtx_path, entry)
+    return entry
+# ---------------------------------------------------------------------------
+
+
 def check_evtx_available() -> None:
     """Raise error if evtx library not available"""
     if not EVTX_AVAILABLE:
@@ -344,63 +428,28 @@ def _iter_evtx_rust(
     provider: Optional[str],
     max_scan: int,
 ) -> Generator[dict[str, Any], None, None]:
-    """Fast path using Rust evtx library with JSON output."""
+    """Fast path using Rust evtx library with JSON output + in-memory cache."""
 
+    # --- Populate cache if needed ---
+    cached = _get_cached(evtx_path)
+    if cached is None:
+        cached = _populate_cache(evtx_path, max_scan)
+
+    # --- Filter cached events ---
     event_ids_set = set(event_ids) if event_ids else None
 
     # Pre-compile case-insensitive regex for contains/not_contains
     contains_pat = None
     if contains:
-        # All terms must match — we check each individually
         contains_pat = [re.compile(re.escape(t), re.IGNORECASE) for t in contains]
     not_contains_pat = None
     if not_contains:
-        # Any term matching → exclude
         not_contains_pat = re.compile(
             "|".join(re.escape(t) for t in not_contains), re.IGNORECASE,
         )
 
-    scanned = 0
-    parser = _evtx_rust.PyEvtxParser(str(evtx_path))
-
-    for record in parser.records_json():
-        if isinstance(record, Exception):
-            continue
-
-        scanned += 1
-        if scanned > max_scan:
-            break
-
-        data_str = record["data"]
-
-        # --- Fast pre-filters on the raw JSON string (no parsing yet) ---
-
-        # Event ID pre-filter: check for the number in the raw string
-        # (avoids json.loads for non-matching events)
-        if event_ids_set:
-            # Quick string check before full parse
-            if not any(f'"EventID":{eid}' in data_str or f'"EventID": {eid}' in data_str for eid in event_ids_set):
-                continue
-
-        # Contains filter on raw JSON string
-        if contains_pat:
-            if not all(p.search(data_str) for p in contains_pat):
-                continue
-
-        # Not-contains filter on raw JSON string
-        if not_contains_pat:
-            if not_contains_pat.search(data_str):
-                continue
-
-        # --- Parse JSON and extract structured data ---
-        try:
-            event_dict = json.loads(data_str)
-        except (json.JSONDecodeError, ValueError):
-            continue
-
-        event_data = extract_event_data_json(event_dict)
-
-        # Precise Event ID filter (the string pre-filter may have false positives)
+    for i, event_data in enumerate(cached.events):
+        # Event ID filter (direct int comparison on cached dict)
         if event_ids_set and event_data["EventID"] not in event_ids_set:
             continue
 
@@ -417,10 +466,20 @@ def _iter_evtx_rust(
                 if end_time and event_time > end_time:
                     continue
 
-        # Store raw JSON for reference (smaller than XML)
-        event_data["_raw_xml"] = data_str
+        # Contains/not_contains filter on raw JSON string
+        if contains_pat or not_contains_pat:
+            raw = cached.raw_strings[i]
+            if contains_pat:
+                if not all(p.search(raw) for p in contains_pat):
+                    continue
+            if not_contains_pat:
+                if not_contains_pat.search(raw):
+                    continue
 
-        yield event_data
+        # Return a copy with raw JSON reference
+        result = dict(event_data)
+        result["_raw_xml"] = cached.raw_strings[i]
+        yield result
 
 
 def _iter_evtx_python(
