@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator, Optional, Sequence
-from xml.etree import ElementTree as ET
 
+# Rust-backed EVTX parser (preferred — 200x faster)
+try:
+    import evtx as _evtx_rust
+    EVTX_RUST_AVAILABLE = True
+except ImportError:
+    EVTX_RUST_AVAILABLE = False
+
+# Pure-Python fallback
 try:
     from Evtx.Evtx import Evtx
     from Evtx.Views import evtx_file_xml_view
-    EVTX_AVAILABLE = True
+    from xml.etree import ElementTree as ET
+    EVTX_PYTHON_AVAILABLE = True
 except ImportError:
-    EVTX_AVAILABLE = False
+    EVTX_PYTHON_AVAILABLE = False
+
+EVTX_AVAILABLE = EVTX_RUST_AVAILABLE or EVTX_PYTHON_AVAILABLE
 
 from ..config import (
     MAX_EVTX_RESULTS,
@@ -187,12 +199,12 @@ def extract_event_data(event_dict: dict) -> dict[str, Any]:
 def _flatten_dict(d: dict, result: dict, prefix: str) -> None:
     """Flatten nested dictionary for easier querying"""
     for key, value in d.items():
-        if key.startswith("@"):  # Skip attributes marker
+        if key.startswith("@") or key.startswith("#"):  # Skip attributes marker
             continue
         new_key = f"{prefix}{key}" if prefix else key
         if isinstance(value, dict):
             # Check if it's a simple value dict with just #text
-            if "#text" in value and len([k for k in value.keys() if not k.startswith("@")]) == 1:
+            if "#text" in value and len([k for k in value.keys() if not k.startswith("@") and not k.startswith("#")]) == 1:
                 result[new_key] = value["#text"]
             else:
                 _flatten_dict(value, result, f"{new_key}.")
@@ -204,6 +216,81 @@ def _flatten_dict(d: dict, result: dict, prefix: str) -> None:
                     result[f"{new_key}[{i}]"] = item
         else:
             result[new_key] = value
+
+
+def extract_event_data_json(event_dict: dict) -> dict[str, Any]:
+    """Extract and flatten event data from Rust evtx JSON output.
+
+    The Rust parser produces JSON with ``#attributes`` keys and flat
+    EventData (no nested ``<Data Name="...">`` elements), so this is
+    simpler and faster than the XML-based ``extract_event_data()``.
+    """
+    result: dict[str, Any] = {
+        "EventID": None,
+        "TimeCreated": None,
+        "Computer": None,
+        "Channel": None,
+        "Provider": None,
+        "EventData": {},
+        "UserData": {},
+    }
+
+    event = event_dict.get("Event", event_dict)
+    system = event.get("System", {})
+
+    # EventID — Rust parser gives int directly
+    event_id = system.get("EventID")
+    if isinstance(event_id, dict):
+        event_id = event_id.get("#text")
+    if event_id is not None:
+        try:
+            result["EventID"] = int(event_id)
+        except (ValueError, TypeError):
+            result["EventID"] = event_id
+    else:
+        result["EventID"] = event_id
+
+    # TimeCreated
+    time_created = system.get("TimeCreated", {})
+    if isinstance(time_created, dict):
+        result["TimeCreated"] = (
+            time_created.get("#attributes", {}).get("SystemTime")
+            or time_created.get("@attributes", {}).get("SystemTime")
+        )
+    else:
+        result["TimeCreated"] = time_created
+
+    # Other system fields
+    result["Computer"] = system.get("Computer")
+    result["Channel"] = system.get("Channel")
+
+    provider = system.get("Provider", {})
+    if isinstance(provider, dict):
+        result["Provider"] = (
+            provider.get("#attributes", {}).get("Name")
+            or provider.get("@attributes", {}).get("Name")
+        )
+    else:
+        result["Provider"] = provider
+
+    # EventData — Rust JSON already has flat key-value pairs
+    event_data = event.get("EventData", {})
+    if isinstance(event_data, dict):
+        for k, v in event_data.items():
+            if k.startswith("#") or k.startswith("@"):
+                continue
+            if v is None:
+                v = ""
+            result["EventData"][k] = str(v) if not isinstance(v, str) else v
+
+    # UserData
+    user_data = event.get("UserData", {})
+    if isinstance(user_data, dict):
+        flattened: dict[str, Any] = {}
+        _flatten_dict(user_data, flattened, "")
+        result["UserData"] = flattened if flattened else user_data
+
+    return result
 
 
 def iter_evtx_events(
@@ -218,55 +305,172 @@ def iter_evtx_events(
 ) -> Generator[dict[str, Any], None, None]:
     """
     Iterate over events in an EVTX file with filtering.
-    
-    Args:
-        evtx_path: Path to the .evtx file
-        start_time: Only return events after this time
-        end_time: Only return events before this time
-        event_ids: Only return events with these Event IDs
-        contains: Only return events containing ALL of these strings (case-insensitive)
-        not_contains: Exclude events containing ANY of these strings
-        provider: Only return events from this provider
-        max_scan: Maximum number of events to scan
-        
-    Yields:
-        Parsed event dictionaries
+
+    Uses the Rust-backed evtx library when available (200x+ faster).
+    Falls back to python-evtx if the Rust library is not installed.
     """
     check_evtx_available()
-    
+
     evtx_path = Path(evtx_path)
     if not evtx_path.exists():
         raise FileNotFoundError(f"EVTX file not found: {evtx_path}")
-    
-    # Normalize filters
+
+    if EVTX_RUST_AVAILABLE:
+        yield from _iter_evtx_rust(
+            evtx_path, start_time, end_time, event_ids,
+            contains, not_contains, provider, max_scan,
+        )
+    else:
+        yield from _iter_evtx_python(
+            evtx_path, start_time, end_time, event_ids,
+            contains, not_contains, provider, max_scan,
+        )
+
+
+def _iter_evtx_rust(
+    evtx_path: Path,
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+    event_ids: Optional[Sequence[int]],
+    contains: Optional[Sequence[str]],
+    not_contains: Optional[Sequence[str]],
+    provider: Optional[str],
+    max_scan: int,
+) -> Generator[dict[str, Any], None, None]:
+    """Fast path using Rust evtx library with JSON output."""
+
     event_ids_set = set(event_ids) if event_ids else None
-    contains_lower = [s.lower() for s in contains] if contains else None
-    not_contains_lower = [s.lower() for s in not_contains] if not_contains else None
-    
+
+    # Pre-compile case-insensitive regex for contains/not_contains
+    contains_pat = None
+    if contains:
+        # All terms must match — we check each individually
+        contains_pat = [re.compile(re.escape(t), re.IGNORECASE) for t in contains]
+    not_contains_pat = None
+    if not_contains:
+        # Any term matching → exclude
+        not_contains_pat = re.compile(
+            "|".join(re.escape(t) for t in not_contains), re.IGNORECASE,
+        )
+
     scanned = 0
-    
+    parser = _evtx_rust.PyEvtxParser(str(evtx_path))
+
+    for record in parser.records_json():
+        if isinstance(record, Exception):
+            continue
+
+        scanned += 1
+        if scanned > max_scan:
+            break
+
+        data_str = record["data"]
+
+        # --- Fast pre-filters on the raw JSON string (no parsing yet) ---
+
+        # Event ID pre-filter: check for the number in the raw string
+        # (avoids json.loads for non-matching events)
+        if event_ids_set:
+            # Quick string check before full parse
+            if not any(f'"EventID":{eid}' in data_str or f'"EventID": {eid}' in data_str for eid in event_ids_set):
+                continue
+
+        # Contains filter on raw JSON string
+        if contains_pat:
+            if not all(p.search(data_str) for p in contains_pat):
+                continue
+
+        # Not-contains filter on raw JSON string
+        if not_contains_pat:
+            if not_contains_pat.search(data_str):
+                continue
+
+        # --- Parse JSON and extract structured data ---
+        try:
+            event_dict = json.loads(data_str)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        event_data = extract_event_data_json(event_dict)
+
+        # Precise Event ID filter (the string pre-filter may have false positives)
+        if event_ids_set and event_data["EventID"] not in event_ids_set:
+            continue
+
+        # Provider filter
+        if provider and event_data["Provider"] != provider:
+            continue
+
+        # Time filters
+        if start_time or end_time:
+            event_time = parse_evtx_timestamp(event_data["TimeCreated"])
+            if event_time:
+                if start_time and event_time < start_time:
+                    continue
+                if end_time and event_time > end_time:
+                    continue
+
+        # Store raw JSON for reference (smaller than XML)
+        event_data["_raw_xml"] = data_str
+
+        yield event_data
+
+
+def _iter_evtx_python(
+    evtx_path: Path,
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+    event_ids: Optional[Sequence[int]],
+    contains: Optional[Sequence[str]],
+    not_contains: Optional[Sequence[str]],
+    provider: Optional[str],
+    max_scan: int,
+) -> Generator[dict[str, Any], None, None]:
+    """Fallback path using pure-Python python-evtx library."""
+
+    event_ids_set = set(event_ids) if event_ids else None
+
+    # Pre-compile regex for contains/not_contains
+    contains_pat = None
+    if contains:
+        contains_pat = [re.compile(re.escape(t), re.IGNORECASE) for t in contains]
+    not_contains_pat = None
+    if not_contains:
+        not_contains_pat = re.compile(
+            "|".join(re.escape(t) for t in not_contains), re.IGNORECASE,
+        )
+
+    scanned = 0
+
     with Evtx(str(evtx_path)) as evtx:
         for xml_str, record in evtx_file_xml_view(evtx.get_file_header()):
             scanned += 1
             if scanned > max_scan:
                 break
-            
+
             try:
+                # Content filters on raw string (before expensive XML parse)
+                if contains_pat:
+                    if not all(p.search(xml_str) for p in contains_pat):
+                        continue
+
+                if not_contains_pat:
+                    if not_contains_pat.search(xml_str):
+                        continue
+
                 # Parse XML
                 root = ET.fromstring(xml_str)
                 event_dict = xml_to_dict(root)
                 event_data = extract_event_data(event_dict)
-                
-                # Apply filters
-                
+
                 # Event ID filter
                 if event_ids_set and event_data["EventID"] not in event_ids_set:
                     continue
-                
+
                 # Provider filter
                 if provider and event_data["Provider"] != provider:
                     continue
-                
+
                 # Time filters
                 if start_time or end_time:
                     event_time = parse_evtx_timestamp(event_data["TimeCreated"])
@@ -275,25 +479,13 @@ def iter_evtx_events(
                             continue
                         if end_time and event_time > end_time:
                             continue
-                
-                # Content filters
-                xml_lower = xml_str.lower()
-                
-                if contains_lower:
-                    if not all(term in xml_lower for term in contains_lower):
-                        continue
-                
-                if not_contains_lower:
-                    if any(term in xml_lower for term in not_contains_lower):
-                        continue
-                
+
                 # Add raw XML for reference
                 event_data["_raw_xml"] = xml_str
-                
+
                 yield event_data
-                
+
             except ET.ParseError:
-                # Skip malformed events
                 continue
 
 

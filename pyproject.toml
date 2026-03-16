@@ -1,6 +1,6 @@
 [project]
 name = "winforensics-mcp"
-version = "1.1.0"
+version = "1.2.0"
 description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, PE analysis, API Monitor knowledge base, and remote artifact collection for DFIR"
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,7 +19,7 @@ classifiers = [
 
 dependencies = [
     "mcp>=1.0.0",
-    "python-evtx>=0.7.0",
+    "evtx>=0.8.0",
     "python-registry>=1.3.0",
     "python-dateutil>=2.8.2",
     "pefile>=2023.2.7",

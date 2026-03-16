@@ -160,8 +160,8 @@ def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any
 
     truncation_info = {}
 
-    # First, check if we're already under the limit
-    initial_json = json.dumps(data, indent=2, default=str)
+    # Serialize once (compact) to check size
+    initial_json = json.dumps(data, default=str)
     if len(initial_json) <= max_chars:
         return data, truncation_info
 
@@ -185,7 +185,7 @@ def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any
         modified[key] = [_truncate_nested_arrays(item, NESTED_ARRAY_KEYS) for item in arr]
 
     # Check if nested truncation was enough
-    current_json = json.dumps(modified, indent=2, default=str)
+    current_json = json.dumps(modified, default=str)
     if len(current_json) <= max_chars:
         return modified, truncation_info
 
@@ -197,16 +197,16 @@ def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any
         if not isinstance(arr, list) or len(arr) == 0:
             continue
 
-        # Calculate how much we need to reduce
-        current_json = json.dumps(modified, indent=2, default=str)
-        if len(current_json) <= max_chars:
+        # Re-check current size
+        current_len = len(json.dumps(modified, default=str))
+        if current_len <= max_chars:
             break
 
         # Estimate items to keep based on average item size
-        arr_json = json.dumps(arr, indent=2, default=str)
+        arr_json = json.dumps(arr, default=str)
         if len(arr) > 0:
             avg_item_size = len(arr_json) / len(arr)
-            excess_chars = len(current_json) - max_chars
+            excess_chars = current_len - max_chars
             items_to_remove = int(excess_chars / avg_item_size) + 1
             keep_count = max(TRUNCATE_KEEP_ITEMS, len(arr) - items_to_remove)
 
@@ -219,7 +219,7 @@ def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any
                 modified[key] = arr[:keep_count]
 
     # Final check - if still too large, do aggressive truncation
-    final_json = json.dumps(modified, indent=2, default=str)
+    final_json = json.dumps(modified, default=str)
     if len(final_json) > max_chars:
         # Aggressive: reduce all arrays to minimum
         for key in ARRAY_KEYS:
@@ -236,10 +236,10 @@ def _smart_truncate(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> tuple[Any
 
 
 def json_response(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> str:
-    """Convert data to JSON string for response, with smart truncation if too large"""
+    """Convert data to compact JSON string for response, with smart truncation if too large."""
 
-    # Try without truncation first
-    result = json.dumps(data, indent=2, default=str)
+    # Serialize compact (no indent) — saves ~40% size
+    result = json.dumps(data, default=str)
 
     if len(result) <= max_chars:
         return result
@@ -257,7 +257,7 @@ def json_response(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> str:
             "hint": "Use time_range_start/end to focus on incident window, or use offset parameter to paginate through all results"
         }
 
-    return json.dumps(truncated_data, indent=2, default=str)
+    return json.dumps(truncated_data, default=str)
 
 
 @server.list_tools()
@@ -1943,7 +1943,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text=result)]
     except Exception as e:
         logger.exception(f"Error executing tool {name}")
-        return [TextContent(type="text", text=json.dumps({"error": str(e)}, indent=2))]
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
 async def _execute_tool(name: str, args: dict[str, Any]) -> str:

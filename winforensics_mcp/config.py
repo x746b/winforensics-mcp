@@ -5,7 +5,7 @@ from typing import Optional
 # Limits for query results to avoid overwhelming LLM context
 MAX_EVTX_RESULTS = 40
 MAX_REGISTRY_RESULTS = 50
-MAX_SCAN_EVENTS = 10000  # Max events to scan in a single file
+MAX_SCAN_EVENTS = 100000  # Max events to scan in a single file (Rust parser handles this trivially)
 MAX_PREFETCH_RESULTS = 20
 MAX_AMCACHE_RESULTS = 30
 MAX_TIMELINE_RESULTS = 50
