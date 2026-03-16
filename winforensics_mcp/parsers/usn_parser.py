@@ -6,6 +6,7 @@ Records file creation, deletion, modification, and rename operations.
 """
 from __future__ import annotations
 
+import mmap
 import struct
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,12 +103,37 @@ def _is_interesting_change(reasons: list[str]) -> bool:
     return bool(set(reasons) & interesting)
 
 
+def _build_record(major_ver: int, minor_ver: int, file_ref: int, parent_ref: int,
+                   usn: int, timestamp_ft: int, reason: int, source_info: int,
+                   security_id: int, file_attrs: int, filename: str) -> dict[str, Any]:
+    """Build a full USN record dict from raw fields."""
+    dt = _filetime_to_datetime(timestamp_ft)
+    return {
+        "version": f"{major_ver}.{minor_ver}",
+        "usn": usn,
+        "timestamp": dt.isoformat() if dt else None,
+        "file_reference": file_ref,
+        "file_reference_mft_entry": file_ref & 0xFFFFFFFFFFFF,
+        "file_reference_sequence": (file_ref >> 48) & 0xFFFF,
+        "parent_reference": parent_ref,
+        "parent_mft_entry": parent_ref & 0xFFFFFFFFFFFF,
+        "filename": filename,
+        "reason": reason,
+        "reasons": _parse_reasons(reason),
+        "file_attributes": file_attrs,
+        "attributes": _parse_attributes(file_attrs),
+        "is_directory": bool(file_attrs & 0x10),
+        "source_info": source_info,
+        "security_id": security_id,
+    }
+
+
 def iter_usn_records(
     usn_path: str | Path,
     skip_sparse: bool = True,
 ) -> Iterator[dict[str, Any]]:
     """
-    Iterate over USN Journal records.
+    Iterate over USN Journal records as dicts.
 
     Args:
         usn_path: Path to $J file
@@ -116,139 +142,119 @@ def iter_usn_records(
     Yields:
         Parsed USN record dictionaries
     """
+    for (maj, minor, file_ref, parent_ref, usn, ts_ft,
+         reason, src_info, sec_id, file_attrs, filename) in iter_usn_raw(usn_path, skip_sparse):
+        yield _build_record(maj, minor, file_ref, parent_ref, usn, ts_ft,
+                            reason, src_info, sec_id, file_attrs, filename)
+
+
+def iter_usn_raw(
+    usn_path: str | Path,
+    skip_sparse: bool = True,
+) -> Iterator[tuple]:
+    """
+    Fast iterator yielding raw USN field tuples (no dict/list allocation per record).
+
+    Yields:
+        (major_ver, minor_ver, file_ref, parent_ref, usn, timestamp_filetime,
+         reason, source_info, security_id, file_attrs, filename)
+    """
     usn_path = Path(usn_path)
     if not usn_path.exists():
         raise FileNotFoundError(f"USN Journal not found: {usn_path}")
 
+    import os
+
     with open(usn_path, 'rb') as f:
-        data = f.read()
+        file_size = os.fstat(f.fileno()).st_size
+        if file_size == 0:
+            return
 
-    offset = 0
-    data_len = len(data)
+        # Use mmap instead of f.read() — avoids loading multi-GB journals into Python heap
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 
-    while offset < data_len - 8:
-        # Skip sparse regions (filled with zeros)
-        if skip_sparse:
-            # Check for zero-filled region
-            if data[offset:offset + 8] == b'\x00' * 8:
-                # Skip to next page boundary (4096 bytes typically)
-                next_page = (offset + 4096) & ~0xFFF
-                if next_page <= offset:
-                    next_page = offset + 4096
-                offset = next_page
+    try:
+        data = mm
+        data_len = file_size
+        offset = 0
+
+        # Pre-allocated buffer for sparse region checks
+        _ZEROS_8 = b'\x00' * 8
+
+        # Struct formats for batch unpacking (avoid per-field unpack overhead)
+        _V2_HEADER = struct.Struct('<IHHQQQQIIIIHH')  # 60 bytes: record_len..filename_offset
+        _V3_HEADER = struct.Struct('<IHHQQQQQQIIIIHH')  # 76 bytes
+
+        while offset < data_len - 8:
+            # Skip sparse regions (filled with zeros)
+            if skip_sparse:
+                if data[offset:offset + 8] == _ZEROS_8:
+                    next_page = (offset + 4096) & ~0xFFF
+                    if next_page <= offset:
+                        next_page = offset + 4096
+                    offset = next_page
+                    continue
+
+            # Read record length
+            if offset + 4 > data_len:
+                break
+
+            record_len = struct.unpack_from('<I', data, offset)[0]
+
+            # Validate record length
+            if record_len < 60 or record_len > 65536:
+                offset += 8
                 continue
 
-        # Read record length
-        if offset + 4 > data_len:
-            break
+            if offset + record_len > data_len:
+                break
 
-        record_len = struct.unpack('<I', data[offset:offset + 4])[0]
+            try:
+                major_ver = struct.unpack_from('<H', data, offset + 4)[0]
 
-        # Validate record length
-        if record_len < 60 or record_len > 65536:
-            # Invalid record, try to skip
-            offset += 8
-            continue
+                if major_ver == 2 and record_len >= 60:
+                    # USN_RECORD_V2 — batch unpack all fixed fields at once
+                    (_, _maj, _min, file_ref, parent_ref, usn, timestamp,
+                     reason, source_info, security_id, file_attrs,
+                     filename_len, filename_offset) = _V2_HEADER.unpack_from(data, offset)
 
-        if offset + record_len > data_len:
-            break
+                    # Extract filename
+                    filename = ""
+                    abs_fn_start = offset + filename_offset
+                    if filename_offset + filename_len <= record_len and abs_fn_start + filename_len <= data_len:
+                        try:
+                            filename = data[abs_fn_start:abs_fn_start + filename_len].decode('utf-16-le')
+                        except UnicodeDecodeError:
+                            filename = "<decode error>"
 
-        record_data = data[offset:offset + record_len]
+                    yield (2, _min, file_ref, parent_ref, usn, timestamp,
+                           reason, source_info, security_id, file_attrs, filename)
 
-        try:
-            # Parse USN record (V2 format - most common)
-            major_ver = struct.unpack('<H', record_data[4:6])[0]
-            minor_ver = struct.unpack('<H', record_data[6:8])[0]
+                elif major_ver == 3 and record_len >= 76:
+                    # USN_RECORD_V3 (128-bit file references) — batch unpack
+                    (_, _maj, _min, file_ref_low, file_ref_high,
+                     parent_ref_low, parent_ref_high, usn, timestamp,
+                     reason, source_info, security_id, file_attrs,
+                     filename_len, filename_offset) = _V3_HEADER.unpack_from(data, offset)
 
-            if major_ver == 2:
-                # USN_RECORD_V2
-                file_ref = struct.unpack('<Q', record_data[8:16])[0]
-                parent_ref = struct.unpack('<Q', record_data[16:24])[0]
-                usn = struct.unpack('<Q', record_data[24:32])[0]
-                timestamp = struct.unpack('<Q', record_data[32:40])[0]
-                reason = struct.unpack('<I', record_data[40:44])[0]
-                source_info = struct.unpack('<I', record_data[44:48])[0]
-                security_id = struct.unpack('<I', record_data[48:52])[0]
-                file_attrs = struct.unpack('<I', record_data[52:56])[0]
-                filename_len = struct.unpack('<H', record_data[56:58])[0]
-                filename_offset = struct.unpack('<H', record_data[58:60])[0]
+                    filename = ""
+                    abs_fn_start = offset + filename_offset
+                    if filename_offset + filename_len <= record_len and abs_fn_start + filename_len <= data_len:
+                        try:
+                            filename = data[abs_fn_start:abs_fn_start + filename_len].decode('utf-16-le')
+                        except UnicodeDecodeError:
+                            filename = "<decode error>"
 
-                # Extract filename
-                filename = ""
-                if filename_offset + filename_len <= record_len:
-                    try:
-                        filename = record_data[filename_offset:filename_offset + filename_len].decode('utf-16-le')
-                    except UnicodeDecodeError:
-                        filename = "<decode error>"
+                    yield (3, _min, file_ref_low, parent_ref_low, usn, timestamp,
+                           reason, source_info, security_id, file_attrs, filename)
 
-                dt = _filetime_to_datetime(timestamp)
+            except (struct.error, IndexError):
+                pass
 
-                yield {
-                    "version": f"{major_ver}.{minor_ver}",
-                    "usn": usn,
-                    "timestamp": dt.isoformat() if dt else None,
-                    "file_reference": file_ref,
-                    "file_reference_mft_entry": file_ref & 0xFFFFFFFFFFFF,
-                    "file_reference_sequence": (file_ref >> 48) & 0xFFFF,
-                    "parent_reference": parent_ref,
-                    "parent_mft_entry": parent_ref & 0xFFFFFFFFFFFF,
-                    "filename": filename,
-                    "reason": reason,
-                    "reasons": _parse_reasons(reason),
-                    "file_attributes": file_attrs,
-                    "attributes": _parse_attributes(file_attrs),
-                    "is_directory": bool(file_attrs & 0x10),
-                    "source_info": source_info,
-                    "security_id": security_id,
-                }
+            offset += record_len
 
-            elif major_ver == 3:
-                # USN_RECORD_V3 (128-bit file references)
-                file_ref_low = struct.unpack('<Q', record_data[8:16])[0]
-                file_ref_high = struct.unpack('<Q', record_data[16:24])[0]
-                parent_ref_low = struct.unpack('<Q', record_data[24:32])[0]
-                parent_ref_high = struct.unpack('<Q', record_data[32:40])[0]
-                usn = struct.unpack('<Q', record_data[40:48])[0]
-                timestamp = struct.unpack('<Q', record_data[48:56])[0]
-                reason = struct.unpack('<I', record_data[56:60])[0]
-                source_info = struct.unpack('<I', record_data[60:64])[0]
-                security_id = struct.unpack('<I', record_data[64:68])[0]
-                file_attrs = struct.unpack('<I', record_data[68:72])[0]
-                filename_len = struct.unpack('<H', record_data[72:74])[0]
-                filename_offset = struct.unpack('<H', record_data[74:76])[0]
-
-                filename = ""
-                if filename_offset + filename_len <= record_len:
-                    try:
-                        filename = record_data[filename_offset:filename_offset + filename_len].decode('utf-16-le')
-                    except UnicodeDecodeError:
-                        filename = "<decode error>"
-
-                dt = _filetime_to_datetime(timestamp)
-
-                yield {
-                    "version": f"{major_ver}.{minor_ver}",
-                    "usn": usn,
-                    "timestamp": dt.isoformat() if dt else None,
-                    "file_reference": file_ref_low,
-                    "file_reference_mft_entry": file_ref_low & 0xFFFFFFFFFFFF,
-                    "file_reference_sequence": (file_ref_low >> 48) & 0xFFFF,
-                    "parent_reference": parent_ref_low,
-                    "parent_mft_entry": parent_ref_low & 0xFFFFFFFFFFFF,
-                    "filename": filename,
-                    "reason": reason,
-                    "reasons": _parse_reasons(reason),
-                    "file_attributes": file_attrs,
-                    "attributes": _parse_attributes(file_attrs),
-                    "is_directory": bool(file_attrs & 0x10),
-                    "source_info": source_info,
-                    "security_id": security_id,
-                }
-
-        except (struct.error, IndexError):
-            pass
-
-        offset += record_len
+    finally:
+        mm.close()
 
 
 def parse_usn_journal(
@@ -290,51 +296,64 @@ def parse_usn_journal(
         end_dt = datetime.fromisoformat(time_range_end.replace("Z", "+00:00"))
 
     filename_lower = filename_filter.lower() if filename_filter else None
-    reason_set = set(r.upper() for r in reason_filter) if reason_filter else None
+    reason_set = None
+    if reason_filter:
+        # Convert reason names to bitmask for fast comparison
+        reason_name_to_flag = {v: k for k, v in USN_REASONS.items()}
+        reason_set = 0
+        for r in reason_filter:
+            flag = reason_name_to_flag.get(r.upper(), 0)
+            reason_set |= flag
 
     records = []
     total_scanned = 0
     reason_counts = {}
 
-    for record in iter_usn_records(usn_path):
+    # Pre-build sorted flag list for reason counting
+    _reason_flags = sorted(USN_REASONS.items())
+
+    # Use raw iterator — avoids dict/list creation for non-matching records
+    for (maj, minor, file_ref, parent_ref, usn_val, ts_ft,
+         reason, src_info, sec_id, file_attrs, filename) in iter_usn_raw(usn_path):
         total_scanned += 1
 
-        # Track reason counts
-        for r in record.get("reasons", []):
-            reason_counts[r] = reason_counts.get(r, 0) + 1
+        # Track reason counts (bitmask check, skip if reason == CLOSE only)
+        if reason:
+            for flag, name in _reason_flags:
+                if reason & flag:
+                    reason_counts[name] = reason_counts.get(name, 0) + 1
 
-        # Apply filters
+        # Apply filters on raw fields (no dict/list allocation)
         if filename_lower:
-            fn = record.get("filename", "").lower()
-            if filename_lower not in fn:
+            if filename_lower not in filename.lower():
                 continue
 
-        if reason_set:
-            record_reasons = set(record.get("reasons", []))
-            if not (record_reasons & reason_set):
+        if reason_set is not None:
+            if not (reason & reason_set):
                 continue
 
         if interesting_only:
-            if not _is_interesting_change(record.get("reasons", [])):
+            # Check interesting flags directly via bitmask
+            INTERESTING_MASK = (0x1 | 0x2 | 0x4 | 0x100 | 0x200 |
+                                0x1000 | 0x2000 | 0x800 | 0x40000 | 0x10000)
+            if not (reason & INTERESTING_MASK):
                 continue
 
-        if files_only and record.get("is_directory"):
+        if files_only and (file_attrs & 0x10):
             continue
 
         # Time filter
         if start_dt or end_dt:
-            ts = record.get("timestamp")
-            if ts:
-                try:
-                    record_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    if start_dt and record_dt < start_dt:
-                        continue
-                    if end_dt and record_dt > end_dt:
-                        continue
-                except ValueError:
-                    pass
+            dt = _filetime_to_datetime(ts_ft)
+            if dt:
+                if start_dt and dt < start_dt:
+                    continue
+                if end_dt and dt > end_dt:
+                    continue
 
-        records.append(record)
+        # Only build full record dict for matched records
+        records.append(_build_record(maj, minor, file_ref, parent_ref, usn_val, ts_ft,
+                                     reason, src_info, sec_id, file_attrs, filename))
 
         if len(records) >= limit:
             break
@@ -415,59 +434,66 @@ def get_file_operations_summary(
         "extension_distribution": {},
     }
 
-    for record in iter_usn_records(usn_path):
+    # Track min/max filetime as ints for speed, convert at end
+    earliest_ft: Optional[int] = None
+    latest_ft: Optional[int] = None
+
+    for (maj, minor, file_ref, parent_ref, usn_val, ts_ft,
+         reason, src_info, sec_id, file_attrs, filename) in iter_usn_raw(usn_path):
         # Time filter
         if start_dt or end_dt:
-            ts = record.get("timestamp")
-            if ts:
-                try:
-                    record_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    if start_dt and record_dt < start_dt:
-                        continue
-                    if end_dt and record_dt > end_dt:
-                        continue
-                except ValueError:
-                    pass
+            dt = _filetime_to_datetime(ts_ft)
+            if dt:
+                if start_dt and dt < start_dt:
+                    continue
+                if end_dt and dt > end_dt:
+                    continue
 
         stats["total_records"] += 1
 
-        # Track timestamps
-        ts = record.get("timestamp")
-        if ts:
-            if stats["earliest_timestamp"] is None or ts < stats["earliest_timestamp"]:
-                stats["earliest_timestamp"] = ts
-            if stats["latest_timestamp"] is None or ts > stats["latest_timestamp"]:
-                stats["latest_timestamp"] = ts
+        # Track timestamps (compare raw filetimes — no datetime conversion)
+        if ts_ft > 0:
+            if earliest_ft is None or ts_ft < earliest_ft:
+                earliest_ft = ts_ft
+            if latest_ft is None or ts_ft > latest_ft:
+                latest_ft = ts_ft
 
-        reasons = record.get("reasons", [])
-        is_dir = record.get("is_directory", False)
+        is_dir = bool(file_attrs & 0x10)
 
-        # Count by reason
-        for r in reasons:
-            stats["reason_distribution"][r] = stats["reason_distribution"].get(r, 0) + 1
+        # Count by reason (bitmask check, no list creation)
+        for flag, name in USN_REASONS.items():
+            if reason & flag:
+                stats["reason_distribution"][name] = stats["reason_distribution"].get(name, 0) + 1
 
-        # Count operations
-        if "FILE_CREATE" in reasons:
+        # Count operations (bitmask checks)
+        if reason & 0x100:  # FILE_CREATE
             if is_dir:
                 stats["directories_created"] += 1
             else:
                 stats["files_created"] += 1
-        if "FILE_DELETE" in reasons:
+        if reason & 0x200:  # FILE_DELETE
             if is_dir:
                 stats["directories_deleted"] += 1
             else:
                 stats["files_deleted"] += 1
-        if "RENAME_NEW_NAME" in reasons:
+        if reason & 0x2000:  # RENAME_NEW_NAME
             stats["files_renamed"] += 1
-        if any(r in reasons for r in ["DATA_OVERWRITE", "DATA_EXTEND", "DATA_TRUNCATION"]):
+        if reason & 0x7:  # DATA_OVERWRITE | DATA_EXTEND | DATA_TRUNCATION
             stats["files_modified"] += 1
 
         # Track file extensions
-        filename = record.get("filename", "")
         if "." in filename and not is_dir:
             ext = filename.rsplit(".", 1)[-1].lower()
-            if len(ext) <= 10:  # Reasonable extension length
+            if len(ext) <= 10:
                 stats["extension_distribution"][ext] = stats["extension_distribution"].get(ext, 0) + 1
+
+    # Convert tracked filetimes to ISO strings
+    if earliest_ft:
+        dt = _filetime_to_datetime(earliest_ft)
+        stats["earliest_timestamp"] = dt.isoformat() if dt else None
+    if latest_ft:
+        dt = _filetime_to_datetime(latest_ft)
+        stats["latest_timestamp"] = dt.isoformat() if dt else None
 
     # Sort distributions
     stats["reason_distribution"] = dict(
@@ -522,14 +548,13 @@ def find_deleted_files(
 
     deleted = []
 
-    for record in iter_usn_records(usn_path):
-        if "FILE_DELETE" not in record.get("reasons", []):
+    for (maj, minor, file_ref, parent_ref, usn_val, ts_ft,
+         reason, src_info, sec_id, file_attrs, filename) in iter_usn_raw(usn_path):
+        if not (reason & 0x200):  # FILE_DELETE
             continue
 
-        if record.get("is_directory"):
+        if file_attrs & 0x10:  # DIRECTORY
             continue
-
-        filename = record.get("filename", "")
 
         # Extension filter
         if ext and not filename.lower().endswith(ext):
@@ -537,18 +562,15 @@ def find_deleted_files(
 
         # Time filter
         if start_dt or end_dt:
-            ts = record.get("timestamp")
-            if ts:
-                try:
-                    record_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    if start_dt and record_dt < start_dt:
-                        continue
-                    if end_dt and record_dt > end_dt:
-                        continue
-                except ValueError:
-                    pass
+            dt = _filetime_to_datetime(ts_ft)
+            if dt:
+                if start_dt and dt < start_dt:
+                    continue
+                if end_dt and dt > end_dt:
+                    continue
 
-        deleted.append(record)
+        deleted.append(_build_record(maj, minor, file_ref, parent_ref, usn_val, ts_ft,
+                                     reason, src_info, sec_id, file_attrs, filename))
 
         if len(deleted) >= limit:
             break
