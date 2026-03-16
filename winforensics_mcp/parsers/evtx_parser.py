@@ -43,7 +43,7 @@ def parse_evtx_timestamp(timestamp_str: str) -> Optional[datetime]:
     """Parse Windows Event Log timestamp to datetime"""
     if not timestamp_str:
         return None
-    
+
     # Handle various timestamp formats
     formats = [
         "%Y-%m-%d %H:%M:%S.%f",
@@ -52,9 +52,16 @@ def parse_evtx_timestamp(timestamp_str: str) -> Optional[datetime]:
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%dT%H:%M:%S",
     ]
-    
+
     # Clean up the timestamp
     timestamp_str = timestamp_str.strip()
+    # Rust evtx record-level timestamps have " UTC" suffix
+    if timestamp_str.endswith(" UTC"):
+        timestamp_str = timestamp_str[:-4]
+    # Python %f only handles 6 digits — truncate excess (e.g., 7-digit .2523953Z)
+    m = re.search(r"(\.\d{7,})", timestamp_str)
+    if m:
+        timestamp_str = timestamp_str[:m.start()] + m.group()[:7] + timestamp_str[m.end():]
     
     for fmt in formats:
         try:
