@@ -388,6 +388,6 @@ claude mcp remove winforensics-mcp --scope user
 
 ## License
 
-Credits: [Rohitab Batra](http://www.rohitab.com/apimonitor) (API Monitor), [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (YARA rules), [horsicq/DIE-engine](https://github.com/horsicq/DIE-engine) (Detect It Easy)
+Credits: [omerbenamram/evtx](https://github.com/omerbenamram/evtx) (Rust EVTX parser), [Rohitab Batra](http://www.rohitab.com/apimonitor) (API Monitor), [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (YARA rules), [horsicq/DIE-engine](https://github.com/horsicq/DIE-engine) (Detect It Easy)
 
 MIT License | xtk | Built for the DFIR community. No Windows required >)
