@@ -42,6 +42,97 @@ def _parse_timestamp(ts) -> Optional[str]:
         return None
 
 
+def _decode_resident_stream(data: bytes, max_chars: int = 4096) -> dict[str, Any]:
+    """Decode small resident stream data for analyst-friendly output."""
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        encodings = ("utf-16", "utf-8")
+    elif data.startswith(b"\x00\x00"):
+        # Some parsers expose Zone.Identifier with leading NULs; strip them
+        # before trying normal text decoding.
+        data = data.lstrip(b"\x00")
+        encodings = ("utf-8", "utf-16-le")
+    else:
+        encodings = ("utf-8", "utf-16-le")
+
+    for encoding in encodings:
+        try:
+            text = data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+        printable = sum(1 for char in text if char.isprintable() or char in "\r\n\t")
+        if text and printable / len(text) >= 0.85:
+            return {
+                "content_encoding": encoding,
+                "content_preview": text[:max_chars],
+                "content_truncated": len(text) > max_chars,
+            }
+
+    hex_preview = data[: max_chars // 2].hex()
+    return {
+        "content_encoding": "hex",
+        "content_preview": hex_preview,
+        "content_truncated": len(data) > max_chars // 2,
+    }
+
+
+def _parse_data_stream(attr, entry_file_size: Optional[int]) -> dict[str, Any]:
+    """Parse a $DATA attribute, including named NTFS alternate data streams."""
+    name = getattr(attr, "name", "") or ""
+    is_ads = bool(name)
+    is_resident = getattr(attr, "is_resident", None)
+    content = getattr(attr, "attribute_content", None)
+    data = getattr(content, "data", None) if content is not None else None
+
+    if data is not None:
+        stream_size = len(data)
+    elif not is_ads:
+        stream_size = entry_file_size
+    else:
+        stream_size = None
+
+    stream = {
+        "name": name,
+        "type": "$DATA",
+        "is_ads": is_ads,
+        "is_resident": is_resident,
+        "size": stream_size,
+        "metadata_size": getattr(attr, "data_size", None),
+    }
+
+    # Only include resident content for named streams; unnamed default streams
+    # can be huge and are not what ADS hunting needs.
+    if is_ads and data:
+        stream.update(_decode_resident_stream(data))
+
+    return stream
+
+
+def _stream_filter_values(entry: dict[str, Any]) -> list[str]:
+    """Build searchable strings for path filters, including ADS paths/content."""
+    path = entry.get("path") or ""
+    values = [path]
+
+    for stream in entry.get("data_streams", []):
+        name = stream.get("name") or ""
+        if not name:
+            continue
+        values.extend([
+            name,
+            f"{path}:{name}" if path else name,
+            stream.get("content_preview") or "",
+        ])
+
+    return values
+
+
+def _entry_matches_filter(entry: dict[str, Any], filter_lower: Optional[str]) -> bool:
+    """Return True when the path filter matches path or ADS metadata."""
+    if not filter_lower:
+        return True
+    return any(filter_lower in value.lower() for value in _stream_filter_values(entry) if value)
+
+
 def _detect_timestomping(
     si_created: Optional[datetime],
     fn_created: Optional[datetime],
@@ -108,10 +199,16 @@ def _parse_mft_entry(entry, include_all_attributes: bool = False) -> dict[str, A
         "sequence": entry.sequence,
         "path": entry.full_path,
         "file_size": entry.file_size,
+        "size_semantics": "unknown",
+        "host_file_size": None,
         "flags": flags_str,
         "is_allocated": "ALLOCATED" in flags_str,
         "is_directory": is_dir,
         "hard_link_count": entry.hard_link_count,
+        "has_ads": False,
+        "is_ads_entry": False,
+        "ads_count": 0,
+        "data_streams": [],
         "timestamps": {
             "si": None,  # $STANDARD_INFORMATION
             "fn": None,  # $FILE_NAME (first one)
@@ -125,6 +222,14 @@ def _parse_mft_entry(entry, include_all_attributes: bool = False) -> dict[str, A
 
     for attr in entry.attributes():
         content = attr.attribute_content
+
+        # $DATA (type 128 / 0x80) - unnamed default stream or named ADS.
+        # Non-resident streams often have no parsed content object, so handle
+        # these before skipping attributes without content.
+        if attr.type_code == 128:
+            result["data_streams"].append(_parse_data_stream(attr, entry.file_size))
+            continue
+
         if content is None:
             continue
 
@@ -159,6 +264,26 @@ def _parse_mft_entry(entry, include_all_attributes: bool = False) -> dict[str, A
                 "mft_modified": _parse_timestamp(content.mft_modified),
                 "name": fn_name,
             }
+
+    ads_streams = [stream for stream in result["data_streams"] if stream.get("is_ads")]
+    unnamed_streams = [stream for stream in result["data_streams"] if not stream.get("is_ads")]
+    result["has_ads"] = bool(ads_streams)
+    result["ads_count"] = len(ads_streams)
+    result["host_file_size"] = unnamed_streams[0].get("size") if unnamed_streams else None
+
+    if unnamed_streams:
+        result["size_semantics"] = "unnamed_data"
+    elif len(ads_streams) == 1:
+        result["size_semantics"] = "ads_stream"
+        result["is_ads_entry"] = True
+        result["stream_name"] = ads_streams[0].get("name")
+        result["stream_path"] = (
+            f"{result['path']}:{ads_streams[0].get('name')}"
+            if result.get("path")
+            else ads_streams[0].get("name")
+        )
+    elif ads_streams:
+        result["size_semantics"] = "multiple_ads_streams"
 
     # Detect timestomping
     if si_timestamps and fn_timestamps:
@@ -208,12 +333,11 @@ def iter_mft_entries(
         if files_only and is_dir:
             continue
 
-        if filter_lower:
-            path = entry.full_path
-            if not path or filter_lower not in path.lower():
-                continue
+        parsed = _parse_mft_entry(entry)
+        if not _entry_matches_filter(parsed, filter_lower):
+            continue
 
-        yield _parse_mft_entry(entry)
+        yield parsed
 
 
 def parse_mft(
@@ -294,12 +418,9 @@ def parse_mft(
         if files_only and is_dir:
             continue
 
-        if filter_lower:
-            path = entry.full_path
-            if not path or filter_lower not in path.lower():
-                continue
-
         parsed = _parse_mft_entry(entry)
+        if not _entry_matches_filter(parsed, filter_lower):
+            continue
 
         # Time range filter (using SI modified time)
         if start_dt or end_dt:

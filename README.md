@@ -33,7 +33,7 @@
 ### File System Artifacts
 | Category | Capabilities |
 |----------|--------------|
-| **MFT** | Master File Table parsing with timestomping detection |
+| **MFT** | Master File Table parsing with ADS metadata and timestomping detection |
 | **USN Journal** | Change journal for file operations and deleted file recovery |
 | **Timeline** | Unified timeline from MFT, USN, Prefetch, Amcache, EVTX |
 
@@ -299,7 +299,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 
 | Tool | Description |
 |------|-------------|
-| `disk_parse_mft` | Parse $MFT with timestomping detection |
+| `disk_parse_mft` | Parse $MFT with ADS metadata and timestomping detection |
 | `disk_parse_usn_journal` | Parse $J for file operations and deleted files |
 
 ### User Activity

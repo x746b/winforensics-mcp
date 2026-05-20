@@ -129,16 +129,22 @@ def _iter_mft_events(
     if not MFT_AVAILABLE:
         return
 
-    filter_lower = keyword_filter.lower() if keyword_filter else None
     count = 0
 
-    for entry in iter_mft_entries(mft_path, allocated_only=True, files_only=True):
+    for entry in iter_mft_entries(
+        mft_path,
+        file_path_filter=keyword_filter,
+        allocated_only=True,
+        files_only=True,
+    ):
         if count >= limit:
             break
 
         path = entry.get("path", "")
-        if filter_lower and filter_lower not in path.lower():
-            continue
+        data_streams = entry.get("data_streams", [])
+        ads_streams = [stream for stream in data_streams if stream.get("is_ads")]
+        host_file_size = entry.get("host_file_size")
+        file_size = host_file_size if host_file_size is not None else entry.get("file_size")
 
         # Get timestamps
         si_ts = entry.get("timestamps", {}).get("si", {})
@@ -166,7 +172,17 @@ def _iter_mft_events(
                     "path": path,
                     "details": {
                         "entry_id": entry.get("entry_id"),
-                        "file_size": entry.get("file_size"),
+                        "file_size": file_size,
+                        "size_semantics": entry.get("size_semantics"),
+                        "has_ads": entry.get("has_ads", False),
+                        "ads_count": entry.get("ads_count", 0),
+                        "ads_streams": [
+                            {
+                                "name": stream.get("name"),
+                                "size": stream.get("size"),
+                            }
+                            for stream in ads_streams
+                        ],
                         "timestomping": timestomping_detected,
                     },
                 }
@@ -190,7 +206,17 @@ def _iter_mft_events(
                     "path": path,
                     "details": {
                         "entry_id": entry.get("entry_id"),
-                        "file_size": entry.get("file_size"),
+                        "file_size": file_size,
+                        "size_semantics": entry.get("size_semantics"),
+                        "has_ads": entry.get("has_ads", False),
+                        "ads_count": entry.get("ads_count", 0),
+                        "ads_streams": [
+                            {
+                                "name": stream.get("name"),
+                                "size": stream.get("size"),
+                            }
+                            for stream in ads_streams
+                        ],
                     },
                 }
 

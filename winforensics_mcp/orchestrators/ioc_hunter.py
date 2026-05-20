@@ -452,13 +452,37 @@ def _search_mft_ioc(
 
         matches = []
         for entry in entries[:10]:
+            path = entry.get("path") or ""
+            filename = path.replace("\\", "/").rsplit("/", 1)[-1] if path else None
+            timestamps = entry.get("timestamps") or {}
+            si_timestamps = timestamps.get("si") or {}
+            timestomping = entry.get("timestomping") or {}
+            ads_streams = [
+                {
+                    "name": stream.get("name"),
+                    "size": stream.get("size"),
+                    "is_resident": stream.get("is_resident"),
+                    "content_preview": stream.get("content_preview"),
+                }
+                for stream in entry.get("data_streams", [])
+                if stream.get("is_ads")
+            ]
             matches.append({
-                "filename": entry.get("filename"),
-                "path": entry.get("path"),
-                "size": entry.get("size"),
-                "created": entry.get("si_created"),
-                "modified": entry.get("si_modified"),
-                "is_timestomped": entry.get("is_timestomped"),
+                "filename": filename,
+                "path": path,
+                "size": (
+                    entry.get("host_file_size")
+                    if entry.get("host_file_size") is not None
+                    else entry.get("file_size")
+                ),
+                "size_semantics": entry.get("size_semantics"),
+                "created": si_timestamps.get("created"),
+                "modified": si_timestamps.get("modified"),
+                "is_timestomped": timestomping.get("detected", False),
+                "has_ads": entry.get("has_ads", False),
+                "ads_count": entry.get("ads_count", 0),
+                "stream_path": entry.get("stream_path"),
+                "ads_streams": ads_streams,
             })
 
         return {

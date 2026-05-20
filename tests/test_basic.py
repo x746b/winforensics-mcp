@@ -13,7 +13,7 @@ class TestVersionAndMetadata:
 
     def test_version(self):
         from winforensics_mcp import __version__
-        assert __version__ == "1.0.2"
+        assert __version__ == "1.3.1"
 
     def test_author(self):
         from winforensics_mcp import __author__

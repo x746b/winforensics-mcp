@@ -1656,7 +1656,13 @@ async def list_tools() -> list[Tool]:
         tools.append(
             Tool(
                 name="disk_parse_mft",
-                description="Parse $MFT (Master File Table) for file metadata and timestomping detection. Compares $STANDARD_INFORMATION and $FILE_NAME timestamps to identify manipulation. Answers: When was this file actually created? Has it been timestomped?",
+                description=(
+                    "Parse $MFT (Master File Table) for file metadata, NTFS alternate "
+                    "data streams (ADS), and timestomping detection. Compares "
+                    "$STANDARD_INFORMATION and $FILE_NAME timestamps to identify "
+                    "manipulation. Answers: When was this file actually created? "
+                    "Has it been timestomped? Does it have named streams?"
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1666,7 +1672,10 @@ async def list_tools() -> list[Tool]:
                         },
                         "file_path_filter": {
                             "type": "string",
-                            "description": "Filter by file path (case-insensitive substring)",
+                            "description": (
+                                "Filter by file path, ADS name/path, or resident ADS "
+                                "content (case-insensitive substring)"
+                            ),
                         },
                         "entry_number": {
                             "type": "integer",
