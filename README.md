@@ -63,6 +63,7 @@
 | Category | Capabilities |
 |----------|--------------|
 | **YARA Scanning** | 718 rules from [signature-base](https://github.com/Neo23x0/signature-base) - APT, ransomware, webshells, hacktools |
+| **IoC Packs** | Behavioral IoC packs for hunting across exported logs, filenames, and PCAP payloads; includes optional GPL-2.0 `impacket-iocs` pack with 65 rules |
 | **VirusTotal** | Hash/IP/domain reputation lookups with caching and rate limiting (free tier supported) |
 | **DiE Integration** | Detect packers (UPX, Themida, VMProtect), compilers, .NET, installers via Detect It Easy |
 
@@ -72,6 +73,7 @@
 | `investigate_execution` | Correlates Prefetch + Amcache + SRUM to answer "Was this binary executed?" |
 | `investigate_user_activity` | Correlates Browser + ShellBags + LNK + RecentDocs for user activity timeline |
 | `hunt_ioc` | Searches for IOC (hash/filename/IP/domain) across ALL artifact sources + optional YARA scanning |
+| `hunt_ioc_pack` | Hunts behavioral IoCs from bundled/external metadata packs such as `impacket-iocs` |
 | `build_timeline` | Builds unified forensic timeline from multiple sources |
 
 ### Utilities
@@ -250,6 +252,13 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 | `yara_scan_directory` | Batch scan directory for malware |
 | `yara_list_rules` | List available/bundled YARA rules |
 
+### Behavioral IoC Packs
+
+| Tool | Description |
+|------|-------------|
+| `ioc_pack_list` | List bundled and external IoC packs with license metadata |
+| `hunt_ioc_pack` | Hunt behavioral IoCs across text exports, filenames, and PCAP payloads |
+
 ### Threat Intelligence (VirusTotal)
 
 | Tool | Description |
@@ -390,4 +399,10 @@ claude mcp remove winforensics-mcp --scope user
 
 Credits: [omerbenamram/evtx](https://github.com/omerbenamram/evtx) (Rust EVTX parser), [Rohitab Batra](http://www.rohitab.com/apimonitor) (API Monitor), [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (YARA rules), [horsicq/DIE-engine](https://github.com/horsicq/DIE-engine) (Detect It Easy)
 
-MIT License | xtk | Built for the DFIR community. No Windows required >)
+Core `winforensics-mcp` code is MIT licensed. See [LICENSE](LICENSE).
+
+Optional bundled IoC packs may use different licenses:
+
+- `winforensics_mcp/ioc_packs/impacket-iocs` contains material derived from [ThatTotallyRealMyth/Impacket-IoCs](https://github.com/ThatTotallyRealMyth/Impacket-IoCs) and is licensed under GPL-2.0. See `winforensics_mcp/ioc_packs/impacket-iocs/LICENSE`.
+
+Built for the DFIR community. No Windows required >)

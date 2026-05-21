@@ -13,7 +13,7 @@ class TestVersionAndMetadata:
 
     def test_version(self):
         from winforensics_mcp import __version__
-        assert __version__ == "1.3.1"
+        assert __version__ == "1.4.0"
 
     def test_author(self):
         from winforensics_mcp import __author__
@@ -186,7 +186,7 @@ class TestOrchestratorImports:
         )
 
     def test_ioc_hunter_imports(self):
-        from winforensics_mcp.orchestrators import hunt_ioc
+        from winforensics_mcp.orchestrators import hunt_ioc, hunt_ioc_pack, list_ioc_packs
 
     def test_user_activity_investigator_imports(self):
         from winforensics_mcp.orchestrators import investigate_user_activity
@@ -197,6 +197,8 @@ class TestOrchestratorImports:
             investigate_user_activity,
             build_timeline,
             hunt_ioc,
+            hunt_ioc_pack,
+            list_ioc_packs,
             find_artifact_paths,
         )
 

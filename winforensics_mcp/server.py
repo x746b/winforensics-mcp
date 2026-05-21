@@ -88,7 +88,14 @@ from .parsers import (
     API_DB_AVAILABLE,
 )
 
-from .orchestrators import investigate_execution, build_timeline, hunt_ioc, investigate_user_activity
+from .orchestrators import (
+    investigate_execution,
+    build_timeline,
+    hunt_ioc,
+    hunt_ioc_pack,
+    list_ioc_packs,
+    investigate_user_activity,
+)
 
 from .collectors import (
     WinRMCollector,
@@ -1546,6 +1553,74 @@ async def list_tools() -> list[Tool]:
         )
     )
 
+    tools.append(
+        Tool(
+            name="ioc_pack_list",
+            description="List bundled and optional external behavioral IoC packs, including license metadata and rule counts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "extra_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional external pack directories or pack.json files to include",
+                    },
+                },
+            },
+        )
+    )
+
+    tools.append(
+        Tool(
+            name="hunt_ioc_pack",
+            description="Hunt behavioral IoCs from a metadata pack across exported logs, text artifacts, filenames, and PCAP payloads. Bundled pack: impacket-iocs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artifacts_dir": {
+                        "type": "string",
+                        "description": "Base directory containing forensic artifacts, exported logs, PCAPs, or parsed tool output",
+                    },
+                    "pack": {
+                        "type": "string",
+                        "default": "impacket-iocs",
+                        "description": "Bundled pack id/name to load",
+                    },
+                    "pack_path": {
+                        "type": "string",
+                        "description": "Optional external pack directory or pack.json path",
+                    },
+                    "scan_files": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Scan plaintext exports/logs and filenames",
+                    },
+                    "scan_pcap": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Scan PCAP payloads when scapy is installed",
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "default": 2000,
+                        "description": "Maximum files to inspect",
+                    },
+                    "max_file_size": {
+                        "type": "integer",
+                        "default": 2000000,
+                        "description": "Skip files larger than this many bytes",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Maximum findings/hits to return",
+                    },
+                },
+                "required": ["artifacts_dir"],
+            },
+        )
+    )
+
     # User Activity Investigation orchestrator
     tools.append(
         Tool(
@@ -2558,6 +2633,30 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             evtx_path=args.get("evtx_path"),
         )
         return json_response(result)
+
+    elif name == "ioc_pack_list":
+        result = list_ioc_packs(
+            extra_paths=args.get("extra_paths"),
+        )
+        return json_response(result)
+
+    elif name == "hunt_ioc_pack":
+        try:
+            result = hunt_ioc_pack(
+                artifacts_dir=args["artifacts_dir"],
+                pack=args.get("pack", "impacket-iocs"),
+                pack_path=args.get("pack_path"),
+                scan_files=args.get("scan_files", True),
+                scan_pcap=args.get("scan_pcap", True),
+                max_files=args.get("max_files", 2000),
+                max_file_size=args.get("max_file_size", 2_000_000),
+                limit=args.get("limit", 100),
+            )
+            return json_response(result)
+        except FileNotFoundError as e:
+            return json_response({"error": str(e)})
+        except ValueError as e:
+            return json_response({"error": str(e)})
 
     elif name == "investigate_user_activity":
         result = investigate_user_activity(

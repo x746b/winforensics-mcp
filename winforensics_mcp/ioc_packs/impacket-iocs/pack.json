@@ -1,0 +1,1946 @@
+{
+  "schema_version": "1.0",
+  "id": "impacket-iocs",
+  "name": "Impacket Behavioral IoCs",
+  "version": "2026.05.21.3",
+  "license": "GPL-2.0",
+  "upstream": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs",
+  "description": "Behavioral indicators derived from ThatTotallyRealMyth/Impacket-IoCs. These rules are intended for hunting and correlation, not blind standalone alerting.",
+  "rules": [
+    {
+      "id": "impacket.psexec.remcom_pipes",
+      "name": "psexec.py RemCom named pipes",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "named_pipe",
+        "sysmon",
+        "smb",
+        "edr"
+      ],
+      "tags": [
+        "impacket",
+        "psexec",
+        "remcom",
+        "lateral_movement"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-51",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "remcom_pipe_names",
+          "pattern": "\\\\RemCom_(communicaton|stdout|stdin|stderr)"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "remcom_pipe_names_pcap",
+          "pattern": "RemCom_(communicaton|stdout|stdin|stderr)"
+        }
+      ]
+    },
+    {
+      "id": "impacket.serviceinstall.random_service_binary",
+      "name": "Impacket-style short random service and executable names",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "windows_service",
+        "security_4697",
+        "system_7045",
+        "edr"
+      ],
+      "tags": [
+        "impacket",
+        "psexec",
+        "service_creation"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-52",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "four_letter_service_eight_letter_exe",
+          "patterns": [
+            "(ServiceName|Service Name|DisplayName|Display Name)[^\\r\\n]{0,40}\\b[A-Za-z]{4}\\b",
+            "\\\\[A-Za-z]{8}\\.exe\\b"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.smbexec.output_and_batch",
+      "name": "smbexec.py output and batch artifacts",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "process_command_line",
+        "filesystem",
+        "smb",
+        "edr"
+      ],
+      "tags": [
+        "impacket",
+        "smbexec",
+        "lateral_movement"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-53",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "smbexec_output_file",
+          "pattern": "__output_[A-Za-z]{8}"
+        },
+        {
+          "type": "text_regex",
+          "name": "smbexec_systemroot_batch",
+          "pattern": "%SYSTEMROOT%\\\\[A-Za-z]{8}\\.bat\\b"
+        },
+        {
+          "type": "filename_regex",
+          "name": "smbexec_output_filename",
+          "pattern": "__output_[A-Za-z]{8}"
+        }
+      ]
+    },
+    {
+      "id": "impacket.atexec.fixed_start_boundary",
+      "name": "atexec.py fixed scheduled task StartBoundary",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "scheduled_task",
+        "security_4698",
+        "task_scheduler",
+        "xml"
+      ],
+      "tags": [
+        "impacket",
+        "atexec",
+        "scheduled_task"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-54",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "fixed_2015_start_boundary",
+          "pattern": "<StartBoundary>2015-07-15T20:35:13\\.2757294</StartBoundary>"
+        },
+        {
+          "type": "text_regex",
+          "name": "atexec_temp_output",
+          "pattern": "%windir%\\\\Temp\\\\[^\\s\"']+\\.tmp"
+        }
+      ]
+    },
+    {
+      "id": "impacket.wmipersist.subscription_names",
+      "name": "wmipersist.py permanent WMI subscription naming",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "wmi",
+        "sysmon_19",
+        "sysmon_20",
+        "sysmon_21",
+        "repository"
+      ],
+      "tags": [
+        "impacket",
+        "wmipersist",
+        "persistence",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-55",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ef_ti_timer_subscription",
+          "patterns": [
+            "__EventFilter\\.Name=\"EF_[^\"]+\"|Name\\s*=\\s*EF_[A-Za-z0-9_-]+",
+            "TimerID\\s*=\\s*\"TI_[^\"]+\"|TimerId\\s*=\\s*TI_[A-Za-z0-9_-]+",
+            "ActiveScriptEventConsumer"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcomexec.loopback_admin_output",
+      "name": "Impacket WMI/DCOM loopback ADMIN$ output redirection",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "process_command_line",
+        "wmi",
+        "dcom",
+        "smb"
+      ],
+      "tags": [
+        "impacket",
+        "dcomexec",
+        "lateral_movement"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-56",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "loopback_unc_epoch_output",
+          "pattern": "\\\\\\\\127\\.0\\.0\\.1\\\\[^\\s\"\\']+\\\\__(?:\\d{4,}(?:\\.\\d+)?|<timestamp>)"
+        }
+      ]
+    },
+    {
+      "id": "impacket.secretsdump.vssadmin_sequence",
+      "name": "secretsdump.py VSS extraction command sequence",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "process_command_line",
+        "service_execution",
+        "domain_controller"
+      ],
+      "tags": [
+        "impacket",
+        "secretsdump",
+        "credential_access",
+        "vss"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-61",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "vssadmin_ntds_temp_copy",
+          "patterns": [
+            "vssadmin\\s+(list|create)\\s+shadow",
+            "GLOBALROOT\\\\Device\\\\HarddiskVolumeShadowCopy",
+            "%SYSTEMROOT%\\\\Temp\\\\[A-Za-z]{8}\\.tmp"
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "text_regex",
+          "name": "vssadmin_delete_shadow_quiet",
+          "pattern": "vssadmin\\s+delete\\s+shadows\\s+/shadow=\"?\\{[0-9a-f-]{36}\\}\"?\\s+/Quiet"
+        }
+      ]
+    },
+    {
+      "id": "impacket.mssql.login7_defaults",
+      "name": "MSSQL LOGIN7 Impacket default metadata",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "mssql",
+        "tds",
+        "pcap",
+        "sql_audit"
+      ],
+      "tags": [
+        "impacket",
+        "mssql",
+        "tds"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-63",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ssms_query_and_desktop_host",
+          "patterns": [
+            "Microsoft SQL Server Management Studio - Query",
+            "DESKTOP-[0-9A-F]{8}"
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "ssms_query_default_in_pcap",
+          "pattern": "Microsoft SQL Server Management Studio - Query"
+        }
+      ]
+    },
+    {
+      "id": "impacket.mssqlshell.certutil_upload",
+      "name": "mssqlshell.py certutil upload sequence",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "sql_audit",
+        "process_command_line",
+        "xp_cmdshell",
+        "edr"
+      ],
+      "tags": [
+        "impacket",
+        "mssqlshell",
+        "certutil",
+        "file_upload"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-65",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "b64_decode_hash_sequence",
+          "patterns": [
+            "\\.b64",
+            "certutil\\s+-decode",
+            "certutil\\s+-hashfile[^\\r\\n]+\\s+MD5"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.mssqlshell.idxdefrag_job",
+      "name": "mssqlshell.py self-deleting IdxDefrag SQL Agent job",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "sql_agent",
+        "msdb",
+        "sql_audit"
+      ],
+      "tags": [
+        "impacket",
+        "mssqlshell",
+        "sql_agent"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-66",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "idxdefrag_cmdexec_job",
+          "patterns": [
+            "IdxDefrag",
+            "INDEXDEFRAG",
+            "Defragmentation",
+            "CMDEXEC"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.wpad_pac",
+      "name": "ntlmrelayx WPAD PAC response body",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "http",
+        "proxy",
+        "pcap",
+        "wpad"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "wpad",
+        "relay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-69",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "compact_findproxyforurl",
+          "patterns": [
+            "function FindProxyForURL\\(url, host\\)\\{if \\(\\(host == \"localhost\"\\)",
+            "application/x-ns-proxy-autoconfig"
+          ],
+          "mode": "any"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "compact_findproxyforurl_pcap",
+          "pattern": "function FindProxyForURL\\(url, host\\)\\{if \\(\\(host == \"localhost\"\\)"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.webdav_bait",
+      "name": "ntlmrelayx WebDAV bait XML",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "http",
+        "webdav",
+        "pcap",
+        "proxy"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "webdav",
+        "relay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-70",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "webdavrelay_fixed_timestamps",
+          "patterns": [
+            "http://webdavrelay/file/",
+            "2016-11-12T22:00:22Z",
+            "Mon, 20 Mar 2017 00:00:22 GMT"
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "webdavrelay_fixed_timestamps_pcap",
+          "pattern": "http://webdavrelay/file/|2016-11-12T22:00:22Z|Mon, 20 Mar 2017 00:00:22 GMT"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.multirelay_redirect",
+      "name": "ntlmrelayx multi-relay NTLM 307 redirect",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "http",
+        "proxy",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "relay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-71",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ntlm_307_uppercase_redirect",
+          "patterns": [
+            "HTTP/1\\.[01]\\s+307",
+            "Location:\\s*/[A-Z0-9]{10}",
+            "(WWW-Authenticate|Proxy-Authenticate):\\s*NTLM",
+            "Content-Length:\\s*0"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.rdp_server_cert",
+      "name": "ntlmrelayx RDP relay default certificate CN",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "rdp",
+        "tls",
+        "certificate",
+        "zeek"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "rdp",
+        "relay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-72",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "rdp_server_certificate_cn",
+          "pattern": "(CN=RDP-Server|common_name\\s*=\\s*RDP-Server|subject[^\\r\\n]+RDP-Server)"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.sccm_policy_strings",
+      "name": "ntlmrelayx SCCM policy attack client strings",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "sccm",
+        "iis",
+        "http",
+        "pcap",
+        "proxy"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "sccm",
+        "relay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-73",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "sccm_policy_registration",
+          "patterns": [
+            "CCM_POST\\s+/ccm_system_windowsauth/request",
+            "AgentIdentity=\"CCMSetup\\.exe\"",
+            "AgentVersion=\"5\\.00\\.8325\\.0000\""
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "text_regex",
+          "name": "sccm_legacy_client_values",
+          "patterns": [
+            "ClientVersion>5\\.00\\.8325\\.0000</ClientVersion>",
+            "<Property Name=\"ClientCapabilities\">NonSSL</Property>",
+            "ConfigMgr Client"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.kerberos.asreq_shape",
+      "name": "Kerberos AS-REQ Impacket option and sname shape",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "asreq"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-01",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "asreq_kdc_options_50800000",
+          "patterns": [
+            "krb-as-req|as-req",
+            "kdc-options:\\s*50800000",
+            "name-type:\\s*kRB5-NT-PRINCIPAL \\(1\\)",
+            "SNameString:\\s*krbtgt"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.kerberos.asreq_till_equals_rtime",
+      "name": "AS-REQ till and rtime are equal in decoded request",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "asreq"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-02",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "till_equals_rtime",
+          "pattern": "till:\\s*([^\r\n]+)\\s+rtime:\\s*\u0001"
+        }
+      ]
+    },
+    {
+      "id": "impacket.kerberos.asreq_sparse_etypes",
+      "name": "Sparse singleton AS-REQ encryption type list",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "asreq"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-03",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "singleton_aes_or_rc4_asreq",
+          "patterns": [
+            "krb-as-req|as-req",
+            "etype:\\s*1 item",
+            "ENCTYPE:\\s*(eTYPE-AES256-CTS-HMAC-SHA1-96|eTYPE-ARCFOUR-HMAC-MD5|rc4-hmac|aes256)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.getnpusers.rc4_then_aes_retry",
+      "name": "GetNPUsers.py RC4-only AS-REQ followed by AES retry evidence",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "getnpusers",
+        "asreproast"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-04",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "etype_nosupp_rc4_aes_retry",
+          "patterns": [
+            "KDC_ERR_ETYPE_NOSUPP|ETYPE_NOSUPP",
+            "rc4-hmac|eTYPE-ARCFOUR-HMAC-MD5",
+            "aes256|eTYPE-AES256-CTS-HMAC-SHA1-96",
+            "aes128|eTYPE-AES128-CTS-HMAC-SHA1-96"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.kerberos.tgs_etype_order",
+      "name": "TGS-REQ RC4/DES3/DES enctype ordering",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "tgsreq"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-05",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "tgs_rc4_des3_des_order",
+          "patterns": [
+            "krb-tgs-req|tgs-req",
+            "rc4-hmac|eTYPE-ARCFOUR-HMAC-MD5",
+            "des3-cbc-sha1|DES3",
+            "des-cbc-md5|DES-CBC-MD5"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.getst.s4u2proxy_rbcd_pac_options",
+      "name": "getST.py S4U2Proxy RBCD PA-PAC-OPTIONS pattern",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "getst",
+        "rbcd"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-06",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "s4u2proxy_rbcd_pac_options",
+          "patterns": [
+            "PA-PAC-OPTIONS|pA-PAC-OPTIONS",
+            "resource.?based.?constrained.?delegation|RBCD",
+            "additional-tickets|additional tickets"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ldap.kerberos_apreq_body_shape",
+      "name": "LDAP Kerberos AP-REQ body differences",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "ldap",
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "ldap",
+        "kerberos"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-07",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ldap_apreq_no_mutual_and_two_snames",
+          "patterns": [
+            "bindRequest|GSS-SPNEGO|LDAP",
+            "ap-options:\\s*0+|ap-options[^\r\n]+mutual[^\r\n]+False",
+            "SNameString:\\s*ldap",
+            "sname-string:\\s*2 items"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ticketer.pac_defaults",
+      "name": "ticketer.py static PAC validation info defaults",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "kerberos",
+        "ticket_cache",
+        "pac"
+      ],
+      "tags": [
+        "impacket",
+        "ticketer",
+        "forged_ticket"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-10",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ticketer_pac_defaults",
+          "patterns": [
+            "LogonCount\\s*[:=]\\s*500",
+            "LogonServer\\s*[:=]\\s*(?:\"\"|''|$)",
+            "UserId\\s*[:=]\\s*500|groups?\\s*[:=][^\r\n]*(513|512|520|518|519)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ticketer.fixed_nonce",
+      "name": "ticketer.py forged EncKDCRepPart nonce 123456789",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "kerberos",
+        "ticket_cache"
+      ],
+      "tags": [
+        "impacket",
+        "ticketer",
+        "forged_ticket"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-11",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "fixed_kdc_reply_nonce",
+          "pattern": "nonce\\s*[:=]\\s*(123456789|0x075bcd15)"
+        }
+      ]
+    },
+    {
+      "id": "impacket.raisechild.enterprise_admin_extrasid",
+      "name": "raiseChild.py Enterprise Admin ExtraSid pattern",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "kerberos",
+        "pac",
+        "ticket_cache"
+      ],
+      "tags": [
+        "impacket",
+        "raisechild",
+        "extrasid"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-12",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "enterprise_admin_extrasid_groups",
+          "patterns": [
+            "ExtraSids?|Extra SID",
+            "-519\b",
+            "513[^\r\n]+512[^\r\n]+520[^\r\n]+518[^\r\n]+519|513,\\s*512,\\s*520,\\s*518,\\s*519"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.spnego.legacy_kerberos_oid_only",
+      "name": "SPNEGO advertises only legacy Microsoft Kerberos OID",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "spnego",
+        "kerberos",
+        "smb",
+        "ldap",
+        "dcerpc"
+      ],
+      "tags": [
+        "impacket",
+        "spnego",
+        "kerberos"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-13",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "legacy_ms_krb5_oid",
+          "pattern": "1\\.2\\.840\\.48018\\.1\\.2\\.2"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "legacy_ms_krb5_oid_pcap",
+          "pattern": "1\\.2\\.840\\.48018\\.1\\.2\\.2"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ldap.raw_apreq_mechtoken",
+      "name": "LDAP Kerberos bind raw AP-REQ mechToken",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "ldap",
+        "kerberos",
+        "spnego",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "ldap",
+        "kerberos",
+        "spnego"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-14",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "raw_apreq_mechtoken",
+          "patterns": [
+            "GSS-SPNEGO|NegTokenInit|bindRequest",
+            "mechToken[^\r\n]*(6e|AP-REQ)|raw Kerberos\\s+AP-REQ"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.kerberos.apreq_missing_gss_checksum",
+      "name": "AP-REQ authenticator missing GSS checksum and seq-number evidence",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "kerberos",
+        "spnego",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "kerberos",
+        "spnego"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-15",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "missing_cksum_seq_number",
+          "patterns": [
+            "AP-REQ|Authenticator",
+            "cksum\\s*(is\\s*)?(absent|missing)|checksum\\s*(is\\s*)?(absent|missing)",
+            "seq-number\\s*(is\\s*)?(absent|missing)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.smb.ascii_clientguid",
+      "name": "SMB2/3 ASCII-letter ClientGuid",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "smb",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "smb"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-20",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ascii_clientguid_decode",
+          "pattern": "ClientGuid[^\r\n]+([A-Za-z]{16}|[A-Za-z]{32})"
+        }
+      ]
+    },
+    {
+      "id": "impacket.smb.negotiate_omissions",
+      "name": "SMB2/3 negotiate omissions and ASCII salt",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "smb",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "smb"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-21",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "smb_negotiate_ascii_salt_caps",
+          "patterns": [
+            "SMB2.*NEGOTIATE|Negotiate Protocol Request",
+            "Capabilities[^\r\n]*(0x00000040|ENCRYPTION)",
+            "AES-128-CCM|AES_128_CCM",
+            "ff(?:\\s+ff){2,}|Padding[^\r\n]+ff"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.smb1.nt_lm_012_only",
+      "name": "SMB1 negotiate offers only NT LM 0.12",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "smb",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "smb1"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-22",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "nt_lm_012_only",
+          "patterns": [
+            "SMB1|Negotiate Protocol Request",
+            "NT LM 0\\.12",
+            "Dialect\\s*Count\\s*[:=]\\s*1|Dialects?\\s*[:=]\\s*1|1 dialect"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlm.omission_cluster",
+      "name": "NTLM omission cluster inconsistent with modern Windows",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "ntlm",
+        "smb",
+        "http",
+        "ldap",
+        "dcerpc"
+      ],
+      "tags": [
+        "impacket",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-24",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ntlm_missing_mic_channel_bindings",
+          "patterns": [
+            "NTLMSSP|NTLMv2",
+            "MIC[^\r\n]*(zero|empty|absent|missing)",
+            "MsvAvChannelBindings[^\r\n]*(absent|missing)|ChannelBindings[^\r\n]*(absent|missing)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.ldap_computer_random_name",
+      "name": "ntlmrelayx LDAP computer creation random 8-uppercase name",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "ldap",
+        "active_directory",
+        "event_log"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "ldap"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-25",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "eight_uppercase_computer_account",
+          "pattern": "\"?(?:sAMAccountName|cn|dNSHostName)\"?\\s*(?:=|:)\\s*\"?[A-Z0-9]{8}\\$\"?"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.wpad_dns_random_a",
+      "name": "ntlmrelayx DNS WPAD bypass random 12-letter A record",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dns",
+        "ldap",
+        "active_directory"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "wpad",
+        "dns"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-26",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "wpad_dns_random_a_record",
+          "patterns": [
+            "wpad|dnsRecord|dNSTombstoned|dnsNode",
+            "\b[A-Za-z]{12}\b",
+            "(A record|TYPE_A|dnsRecord)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmv2.printable_client_challenge",
+      "name": "NTLMv2 client challenge printable alphanumeric bytes",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "ntlm",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-27",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "printable_client_challenge",
+          "pattern": "(client challenge|ClientChallenge)[^\r\n]+[A-Za-z0-9]{8}"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ldap.sicily_cifs_target_name",
+      "name": "LDAP Sicily NTLM bind stamps cifs target name",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "ldap",
+        "ntlm",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "ldap",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-28",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "sicily_cifs_target_name",
+          "patterns": [
+            "Sicily|LDAP",
+            "MsvAvTargetName|TargetName",
+            "cifs/"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcerpc.raw_ntlmssp_auth",
+      "name": "DCE/RPC raw NTLMSSP authentication token",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dcerpc",
+        "ntlm",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-29",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "dcerpc_raw_ntlmssp",
+          "patterns": [
+            "DCE/RPC|DCERPC|MSRPC",
+            "NTLMSSP",
+            "SPNEGO[^\r\n]*(absent|missing)|raw NTLMSSP"
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "ntlmssp_payload",
+          "pattern": "NTLMSSP"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlm.type1_static_flags",
+      "name": "NTLM Type 1 static no-version flag shape",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "ntlm",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-32",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "type1_no_version_static_flags",
+          "patterns": [
+            "NTLMSSP.*NEGOTIATE|Type\\s*1|NEGOTIATE_MESSAGE",
+            "Version[^\r\n]*(absent|missing|not present)",
+            "Flags[^\r\n]*(0xa2088207|0xe20882)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmv2.null_hostname_missing_av_pairs",
+      "name": "NTLMv2 NULL host and missing Windows AV pairs",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "ntlm",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "ntlm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-33",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "null_hostname_missing_avpairs",
+          "patterns": [
+            "NTLMv2|AUTHENTICATE_MESSAGE",
+            "MsvAvNbComputerName[^\r\n]*(NULL|null|empty|absent|missing)|host.?name[^\r\n]*(NULL|null|empty)",
+            "MsvAvTimestamp"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.badsuccessor.dmsa_defaults",
+      "name": "BadSuccessor.py delegated MSA naming and attributes",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "ldap",
+        "active_directory"
+      ],
+      "tags": [
+        "impacket",
+        "badsuccessor",
+        "dmsa"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-35",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "badsuccessor_dmsa_attributes",
+          "patterns": [
+            "msDS-DelegatedManagedServiceAccount|DelegatedManagedServiceAccount",
+            "dMSA-[A-Z0-9]{8}\\$?",
+            "msDS-DelegatedMSAState[^\r\n]+2",
+            "msDS-SupportedEncryptionTypes[^\r\n]+28"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.addcomputer.desktop_name_defaults",
+      "name": "addcomputer.py default DESKTOP computer account",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "ldap",
+        "active_directory",
+        "event_log"
+      ],
+      "tags": [
+        "impacket",
+        "addcomputer"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-36",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "desktop_random_computer_account",
+          "pattern": "\"?(?:sAMAccountName|cn|dNSHostName)\"?\\s*(?:=|:)\\s*\"?DESKTOP-[A-Z0-9]{8}\\$\"?"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcerpc.bind_single_context",
+      "name": "DCE/RPC bind single context item with fixed fragment sizes",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dcerpc",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-37",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "dcerpc_bind_one_context_4280",
+          "patterns": [
+            "bind|Bind PDU|MSRPCBind",
+            "max_tfrag\\s*[:=]\\s*4280|max_xmit_frag\\s*[:=]\\s*4280",
+            "max_rfrag\\s*[:=]\\s*4280|max_recv_frag\\s*[:=]\\s*4280",
+            "Num Ctx Items\\s*[:=]\\s*1|context item[s]?\\s*[:=]\\s*1"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.scmr.dummy_machine_name",
+      "name": "SCMR OpenSCManagerW MachineName DUMMY",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "dcerpc",
+        "svcctl",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc",
+        "scmr"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-38",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "open_scmanager_dummy",
+          "patterns": [
+            "OpenSCManagerW|ROpenSCManagerW",
+            "MachineName|lpMachineName",
+            "DUMMY"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.scmr.enumservices_zero_buffer",
+      "name": "SCMR EnumServicesStatusW zero offered buffer probe",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dcerpc",
+        "svcctl",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc",
+        "scmr"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-39",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "enumservices_zero_buffer_null_resume",
+          "patterns": [
+            "EnumServicesStatusW|REnumServicesStatusW",
+            "Offered\\s*[:=]\\s*0|cbBufSize\\s*[:=]\\s*0",
+            "Resume Index[^\r\n]*(NULL|null|0x00000000)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcerpc.auth_context_79231",
+      "name": "Authenticated DCE/RPC auth_context_id 79231 and 0xff padding",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "dcerpc",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-40",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "auth_context_id_79231",
+          "pattern": "auth_context_id\\s*[:=]\\s*(79231|0x0001357f)"
+        },
+        {
+          "type": "text_regex",
+          "name": "ff_auth_padding",
+          "patterns": [
+            "sec_trailer|security trailer",
+            "padding[^\r\n]+ff(?:\\s*ff)*"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcerpc.ndr32_only_bind",
+      "name": "DCE/RPC bind offers only NDR32",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dcerpc",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-41",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ndr32_only_single_context",
+          "patterns": [
+            "8a885d04-1ceb-11c9-9fe8-08002b104860",
+            "Num Ctx Items\\s*[:=]\\s*1|context item[s]?\\s*[:=]\\s*1",
+            "NDR64[^\r\n]*(absent|missing)|no NDR64|Bind Time Feature Negotiation[^\r\n]*(absent|missing)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.remotecreateinstance_oddities",
+      "name": "DCOM RemoteCreateInstance Impacket activation oddities",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "dcom",
+        "wmi",
+        "dcerpc",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "dcom",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-42",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "remotecreateinstance_oddities",
+          "patterns": [
+            "RemoteCreateInstance|ISystemActivator",
+            "classCtx\\s*[:=]\\s*0|ClassContext\\s*[:=]\\s*0",
+            "ActivationContextInfoData[^\r\n]*(NULL|null)|ClientPtr[^\r\n]*(NULL|null)",
+            "0xcccccccc|fafafafa|fa fa fa"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcerpc.missing_verification_trailer",
+      "name": "DCE/RPC request missing Verification Trailer evidence",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "dcerpc",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-43",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "missing_verification_trailer",
+          "patterns": [
+            "DCE/RPC|DCERPC|RemoteCreateInstance",
+            "Verification Trailer[^\r\n]*(absent|missing|not present)|without providing the Verification Trailer"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.sparse_activation_blob",
+      "name": "WMI DCOM sparse four-property activation blob",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "dcom",
+        "wmi",
+        "dcerpc",
+        "pcap"
+      ],
+      "tags": [
+        "impacket",
+        "dcom",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-44",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "four_property_activation_blob",
+          "patterns": [
+            "RemoteCreateInstance|ActivationProperties|IWbemLevel1Login",
+            "NumActivationPropertyStructs\\s*[:=]\\s*4|activation property structs\\s*[:=]?\\s*4",
+            "000001ab",
+            "000001a5",
+            "000001a4",
+            "000001aa"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.nonstandard_causality_id",
+      "name": "DCOM ORPC causality ID with non-RFC4122 shape",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "dcom",
+        "wmi",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcom",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-45",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "bad_orpc_cid_uuid_shape",
+          "pattern": "(Causality ID|ORPCThis|CID)[^\r\n]+[0-9a-f]{8}-[0-9a-f]{4}-[^4][0-9a-f]{3}-[0-7c-f][0-9a-f]{3}-[0-9a-f]{12}"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.client_impersonation_zero",
+      "name": "DCOM activation ClientImpersonationLevel zero",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "dcom",
+        "wmi",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcom",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-48",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "client_impersonation_level_zero",
+          "patterns": [
+            "RemoteCreateInstance|ScmRequestInfo|DCOM",
+            "ClientImpersonationLevel\\s*[:=]\\s*0",
+            "ProtocolSeq\\s*[:=]\\s*7|NumProtocolSequences\\s*[:=]\\s*1"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.cccccccc_fa_padding",
+      "name": "DCOM activation 0xcccccccc filler and 0xfa padding",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "dcom",
+        "wmi",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcom",
+        "wmi"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-49",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "cccccccc_fa_padding",
+          "patterns": [
+            "0xcccccccc|cccccccc",
+            "fafafafa|fa fa fa|Unused buffer[^\r\n]+fa"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.wkssvc.ten_null_server_name",
+      "name": "WKSSVC helper ten-NUL ServerName",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "dcerpc",
+        "wkssvc",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "dcerpc",
+        "wkssvc"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-50",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "wkssvc_ten_null_servername",
+          "patterns": [
+            "NetrWkstaGetInfo|NetrJoinDomain2|NetrValidateName2|NetrUseEnum|NetrUseGetInfo|NetrGetJoinInformation",
+            "ServerName[^\r\n]*(\\x00){10}|ServerName[^\r\n]*(00\\s*){10}|all-NUL"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.rpcrelayclient.dummy_opnum_255",
+      "name": "rpcrelayclient DummyOp reserved opnum 255",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "dcerpc",
+        "ntlmrelayx",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "rpcrelay"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-57",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "dummy_opnum_255",
+          "patterns": [
+            "opnum\\s*[:=]\\s*255|Opnum:\\s*255",
+            "nca_s_op_rng_error|RPC_E_INVALID_HEADER|DummyOp"
+          ],
+          "mode": "any"
+        }
+      ]
+    },
+    {
+      "id": "impacket.psexec.remcom_machine_four_letters",
+      "name": "RemCom Machine field four random ASCII letters",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "smb",
+        "named_pipe",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "psexec",
+        "remcom"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-58",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "remcom_machine_four_letters",
+          "patterns": [
+            "RemCom_communicaton|RemCom",
+            "Machine\\s*[:=]\\s*[A-Za-z]{4}\b"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.secretsdump.drsbind_extcaps_all",
+      "name": "secretsdump.py DRSBind dwExtCaps 0xffffffff",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "drsuapi",
+        "dcerpc",
+        "domain_controller",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "secretsdump",
+        "dcsync"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-59",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "drsbind_extcaps_all",
+          "patterns": [
+            "DRSBind|DRSUAPI",
+            "dwExtCaps\\s*[:=]\\s*(0xffffffff|4294967295)",
+            "SiteObjGuid[^\r\n]*(NULLGUID|null|00000000-0000-0000-0000-000000000000)|Pid\\s*[:=]\\s*0"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.secretsdump.drsgetncchanges_one_object_zero_usn",
+      "name": "secretsdump.py DRSGetNCChanges one object zero USNs",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "drsuapi",
+        "dcerpc",
+        "domain_controller",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "secretsdump",
+        "dcsync"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-60",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "drsgetncchanges_v8_zero_usn",
+          "patterns": [
+            "DRSGetNCChanges|DRSUAPI",
+            "dwInVersion\\s*[:=]\\s*8",
+            "usnHighObjUpdate\\s*[:=]\\s*0",
+            "usnHighPropUpdate\\s*[:=]\\s*0",
+            "cMaxObjects\\s*[:=]\\s*1",
+            "cMaxBytes\\s*[:=]\\s*0|EXOP_REPL_OBJ"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.keylistattack.rc4_key_list_req",
+      "name": "keylistattack/secretsdump KERB-KEY-LIST-REQ RC4-only",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "kerberos",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "keylistattack",
+        "secretsdump",
+        "kerberos"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-62",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "kerb_key_list_req_rc4",
+          "patterns": [
+            "padata-type\\s*[:=]\\s*161|KERB[-_]KEY[-_]LIST[-_]REQ",
+            "krbtgt",
+            "\\[23\\]|RC4-HMAC|rc4-hmac"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.mssql.prelogin_defaults",
+      "name": "MSSQL PRELOGIN fixed version and instance defaults",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "mssql",
+        "tds",
+        "pcap",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "mssql"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-64",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "mssql_prelogin_defaults",
+          "patterns": [
+            "PRELOGIN|TDS",
+            "08\\s*00\\s*01\\s*55\\s*00\\s*00|Version[^\r\n]+080001550000",
+            "MSSQLServer",
+            "ENCRYPT_OFF|Encryption\\s*[:=]\\s*0x00"
+          ],
+          "mode": "all"
+        },
+        {
+          "type": "pcap_payload_regex",
+          "name": "mssqlserver_instance_payload",
+          "pattern": "MSSQLServer"
+        }
+      ]
+    },
+    {
+      "id": "impacket.tds.raw_apreq_mechtoken",
+      "name": "TDS KerberosLogin raw AP-REQ in mechToken",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "mssql",
+        "tds",
+        "kerberos",
+        "spnego"
+      ],
+      "tags": [
+        "impacket",
+        "mssql",
+        "kerberos"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-67",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "tds_raw_apreq_mechtoken",
+          "patterns": [
+            "TDS|LOGIN7|KerberosLogin|mechToken",
+            "raw AP-REQ|mechToken[^\r\n]*(0x)?6e|KRB_AP_REQ[^\r\n]*(missing|without|no).*TOK_ID"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.ntlmrelayx.local_auth_challenge",
+      "name": "ntlmrelayx HTTP/WinRM local-auth empty AV pairs challenge",
+      "confidence": "high",
+      "weight": 4,
+      "surfaces": [
+        "http",
+        "winrm",
+        "ntlm",
+        "pcap",
+        "proxy"
+      ],
+      "tags": [
+        "impacket",
+        "ntlmrelayx",
+        "http",
+        "winrm"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-68",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "empty_av_pairs_printable_challenge",
+          "patterns": [
+            "WWW-Authenticate|Proxy-Authenticate|WinRM|NTLM",
+            "TargetInfoFields_len\\s*[:=]\\s*0|TargetInfo length\\s*[:=]\\s*0|empty AV pairs",
+            "Version[^\r\n]*(ff\\s*){8}|ff ff ff ff ff ff ff ff",
+            "domain_name\\s*[:=]\\s*(\"\"|''|empty)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.wmi.ntlmlogin_local_namespace_null_locale",
+      "name": "WMI NTLMLogin local namespace and NULL locale over remote DCOM",
+      "confidence": "medium",
+      "weight": 3,
+      "surfaces": [
+        "wmi",
+        "dcom",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "wmi",
+        "dcom"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-30",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "ntlmlogin_local_namespace_null_locale",
+          "patterns": [
+            "IWbemLevel1Login::NTLMLogin|NTLMLogin",
+            "//\\./root/cimv2|//\\./root/cimv2|WszNetworkResource[^\r\n]+//\\./root/cimv2",
+            "WszPreferredLocale[^\r\n]*(NULL|null)|pszPreferredLocale[^\r\n]*(NULL|null)"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.wmi.short_ntlmlogin_flow",
+      "name": "WMI flow jumps from RemoteCreateInstance to NTLMLogin without normal client-info negotiation",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "wmi",
+        "dcom",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "wmi",
+        "dcom"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-31",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "short_remotecreateinstance_ntlmlogin_flow",
+          "patterns": [
+            "RemoteCreateInstance",
+            "NTLMLogin",
+            "SetClientInfo[^\r\n]*(absent|missing|not present)|EstablishPosition[^\r\n]*(absent|missing|not present)|direct.*NTLMLogin"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.skips_serveralive2",
+      "name": "WMI/DCOM activation without IOXIDResolver ServerAlive2 preflight evidence",
+      "confidence": "low",
+      "weight": 1,
+      "surfaces": [
+        "wmi",
+        "dcom",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "wmi",
+        "dcom"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-46",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "missing_serveralive2_preflight",
+          "patterns": [
+            "ISystemActivator::RemoteCreateInstance|RemoteCreateInstance",
+            "IOXIDResolver::ServerAlive2[^\r\n]*(absent|missing|not observed)|No call to IOXIDResolver::ServerAlive2|without ServerAlive2"
+          ],
+          "mode": "all"
+        }
+      ]
+    },
+    {
+      "id": "impacket.dcom.iremunknown_single_public_ref_release",
+      "name": "DCOM IRemUnknown RemRelease single PublicRef pattern",
+      "confidence": "medium",
+      "weight": 2,
+      "surfaces": [
+        "wmi",
+        "dcom",
+        "dcerpc",
+        "decoded_protocol"
+      ],
+      "tags": [
+        "impacket",
+        "wmi",
+        "dcom"
+      ],
+      "reference": "https://github.com/ThatTotallyRealMyth/Impacket-IoCs/blob/main/Impacket-IoCs.md#ioc-47",
+      "detectors": [
+        {
+          "type": "text_regex",
+          "name": "iremunknown_single_ref_release",
+          "patterns": [
+            "IRemUnknown|00000131-0000-0000-c000-000000000046",
+            "RemRelease|opnum\\s*[:=]\\s*5",
+            "InterfaceRefs\\s*[:=]\\s*1|Cnt\\s*[:=]\\s*1|cInterfaceRefs\\s*[:=]\\s*1",
+            "PublicRefs\\s*[:=]\\s*1|Refs\\s*[:=]?\\s*1-0|cPublicRefs\\s*[:=]\\s*1"
+          ],
+          "mode": "all"
+        }
+      ]
+    }
+  ]
+}

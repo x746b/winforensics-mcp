@@ -12,6 +12,11 @@ from .ioc_hunter import (
     hunt_ioc,
 )
 
+from ..ioc_packs import (
+    hunt_ioc_pack,
+    list_ioc_packs,
+)
+
 from .user_activity_investigator import (
     investigate_user_activity,
 )
@@ -22,5 +27,7 @@ __all__ = [
     "build_timeline",
     "find_timeline_artifacts",
     "hunt_ioc",
+    "hunt_ioc_pack",
+    "list_ioc_packs",
     "investigate_user_activity",
 ]

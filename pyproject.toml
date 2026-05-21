@@ -1,6 +1,6 @@
 [project]
 name = "winforensics-mcp"
-version = "1.3.1"
+version = "1.4.0"
 description = "Windows Forensics MCP Server - EVTX parsing, Registry analysis, PE analysis, API Monitor knowledge base, and remote artifact collection for DFIR"
 readme = "README.md"
 license = { text = "MIT" }
@@ -71,6 +71,7 @@ include = [
     "winforensics_mcp/**/*.py",
     "winforensics_mcp/rules/*.yar",
     "winforensics_mcp/rules/README.md",
+    "winforensics_mcp/ioc_packs/**/*",
     "winforensics_mcp/data/api_definitions.db",
 ]
 

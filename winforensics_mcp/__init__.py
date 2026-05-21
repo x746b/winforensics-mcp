@@ -1,4 +1,4 @@
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 __author__ = "xtk"
 
 from .orchestrators import (
@@ -6,6 +6,8 @@ from .orchestrators import (
     investigate_user_activity,
     build_timeline,
     hunt_ioc,
+    hunt_ioc_pack,
+    list_ioc_packs,
     find_artifact_paths,
 )
 
@@ -14,5 +16,7 @@ __all__ = [
     "investigate_user_activity",
     "build_timeline",
     "hunt_ioc",
+    "hunt_ioc_pack",
+    "list_ioc_packs",
     "find_artifact_paths",
 ]
