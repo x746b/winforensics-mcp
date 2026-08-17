@@ -1953,13 +1953,22 @@ async def list_tools() -> list[Tool]:
     tools.append(
         Tool(
             name="user_parse_shellbags",
-            description="Parse ShellBags from UsrClass.dat to reveal folder navigation history. Shows which folders a user browsed in Windows Explorer with timestamps. Answers: Which folders did the user access? When did they browse suspicious paths?",
+            description="Parse ShellBags to reveal folder navigation history, including UNC network shares and the interior of ZIP archives browsed in Explorer. Parses BOTH the UsrClass.dat BagMRU and the matching NTUSER.DAT BagMRU (auto-detected), since some entries exist in only one hive. Reports long folder names, created/modified times and 'last_viewed' (last interacted). Answers: Which folders did the user access? When did they browse suspicious paths? What network shares and archives did they open?",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "usrclass_path": {
                         "type": "string",
-                        "description": "Path to UsrClass.dat (typically in Users/<user>/AppData/Local/Microsoft/Windows/UsrClass.dat)",
+                        "description": "Path to UsrClass.dat (typically in Users/<user>/AppData/Local/Microsoft/Windows/UsrClass.dat). An NTUSER.DAT path is also accepted.",
+                    },
+                    "ntuser_path": {
+                        "type": "string",
+                        "description": "Optional explicit path to the profile's NTUSER.DAT. Auto-detected from the UsrClass.dat location when omitted.",
+                    },
+                    "include_ntuser": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Also parse the NTUSER.DAT BagMRU (Desktop namespace, where network share browsing is often recorded). Set false to parse only the given hive.",
                     },
                     "path_filter": {
                         "type": "string",
@@ -2798,6 +2807,8 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 path_filter=args.get("path_filter"),
                 include_timestamps=True,
                 limit=args.get("limit", MAX_REGISTRY_RESULTS),
+                ntuser_path=args.get("ntuser_path"),
+                include_ntuser=args.get("include_ntuser", True),
             )
         return json_response(result)
 

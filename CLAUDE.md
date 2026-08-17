@@ -69,7 +69,7 @@ Only after orchestrators show HIGH confidence and you need specific details:
 | `registry_get_system_info` | OS version, hostname, timezone |
 | `file_analyze_pe` | Binary analysis (hashes, imports, exports, packers) |
 | `browser_get_history` | Detailed browser history with downloads |
-| `user_parse_shellbags` | Folder navigation with suspicious path detection |
+| `user_parse_shellbags` | Folder navigation, both BagMRU hives; resolves long names, UNC shares, archive interiors |
 | `yara_scan_file` | Scan file for malware signatures (718 rules) |
 | `yara_scan_directory` | Batch scan directory for malware |
 | `vt_lookup_hash` | Get VirusTotal verdict for hash (MD5/SHA1/SHA256) |

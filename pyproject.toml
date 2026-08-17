@@ -27,6 +27,7 @@ dependencies = [
     "libesedb-python>=20240420",
     "mft>=0.7.0",
     "pylnk3>=0.4.3",
+    "libfwsi-python>=20240417",
 ]
 
 [project.optional-dependencies]

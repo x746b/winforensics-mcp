@@ -42,7 +42,7 @@
 |----------|--------------|
 | **Browser** | Edge, Chrome, Firefox history and downloads |
 | **LNK Files** | Windows shortcut analysis for recently accessed files |
-| **ShellBags** | Folder navigation history with suspicious path detection |
+| **ShellBags** | Folder navigation history from both UsrClass.dat and NTUSER.DAT, incl. UNC shares and browsed archive interiors (libfwsi) |
 | **RecentDocs** | Registry-based recent document tracking |
 
 ### Network Forensics
@@ -317,7 +317,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 |------|-------------|
 | `browser_get_history` | Parse Edge/Chrome/Firefox history and downloads |
 | `user_parse_lnk_files` | Parse Windows shortcuts for target paths |
-| `user_parse_shellbags` | Parse ShellBags for folder navigation history |
+| `user_parse_shellbags` | Parse ShellBags (UsrClass.dat + NTUSER.DAT) for folder navigation, network shares and archive browsing |
 
 ### Event Logs
 
