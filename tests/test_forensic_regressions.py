@@ -45,9 +45,9 @@ def dummy_lnk():
         working_dir=r"C:\Evidence",
         arguments=None,
         description="dump",
-        creation_time=datetime(2025, 8, 20, 12, 8, 6),
-        access_time=datetime(2025, 8, 20, 12, 8, 7),
-        modification_time=datetime(2025, 8, 20, 12, 8, 8),
+        creation_time=datetime(2024, 1, 2, 5, 4, 5),
+        access_time=datetime(2024, 1, 2, 5, 4, 6),
+        modification_time=datetime(2024, 1, 2, 5, 4, 7),
         file_size=123,
         relative_path=None,
         icon=None,
@@ -56,9 +56,9 @@ def dummy_lnk():
 
 @pytest.mark.parametrize("host_timezone", ["UTC", "Europe/Prague"])
 def test_lnk_header_filetimes_are_host_timezone_independent(tmp_path, host_timezone):
-    creation = datetime(2025, 8, 20, 10, 8, 6, tzinfo=timezone.utc)
-    access = datetime(2025, 8, 20, 10, 8, 7, tzinfo=timezone.utc)
-    modification = datetime(2025, 8, 20, 10, 8, 8, tzinfo=timezone.utc)
+    creation = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    access = datetime(2024, 1, 2, 3, 4, 6, tzinfo=timezone.utc)
+    modification = datetime(2024, 1, 2, 3, 4, 7, tzinfo=timezone.utc)
     lnk_path = tmp_path / "dump.lnk"
     write_lnk_header(lnk_path, creation, access, modification)
 
@@ -78,11 +78,11 @@ def test_lnk_header_filetimes_are_host_timezone_independent(tmp_path, host_timez
             time.tzset()
 
     assert result["timestamp_source"] == "LNK header FILETIME"
-    assert result["timestamps"]["creation_time"] == "2025-08-20T10:08:06+00:00"
+    assert result["timestamps"]["creation_time"] == "2024-01-02T03:04:05+00:00"
     assert result["target_timestamps"] == {
-        "creation_time_utc": "2025-08-20T10:08:06+00:00",
-        "access_time_utc": "2025-08-20T10:08:07+00:00",
-        "modification_time_utc": "2025-08-20T10:08:08+00:00",
+        "creation_time_utc": "2024-01-02T03:04:05+00:00",
+        "access_time_utc": "2024-01-02T03:04:06+00:00",
+        "modification_time_utc": "2024-01-02T03:04:07+00:00",
     }
 
 
@@ -109,7 +109,7 @@ class FakeKey:
         return self._values
 
     def timestamp(self):
-        return datetime(2025, 8, 20, 10, 13, 57, tzinfo=timezone.utc)
+        return datetime(2024, 1, 2, 8, 9, 10, tzinfo=timezone.utc)
 
 
 class FakeHive:
@@ -123,15 +123,15 @@ class FakeHive:
 
 def test_winlogon_persistence_surfaces_userinit_deviation():
     values = [
-        FakeValue("Userinit", "Userinit.exe, JM.exe"),
+        FakeValue("Userinit", "userinit.exe, helper.exe"),
         FakeValue("Shell", "explorer.exe"),
     ]
     with patch.object(registry_parser, "open_registry_hive", return_value=FakeHive(values)):
         result = registry_parser.get_winlogon_persistence("SOFTWARE")
 
     assert result["present"] is True
-    assert result["last_write_time"] == "2025-08-20T10:13:57+00:00"
-    assert result["values"]["Userinit"] == "Userinit.exe, JM.exe"
+    assert result["last_write_time"] == "2024-01-02T08:09:10+00:00"
+    assert result["values"]["Userinit"] == "userinit.exe, helper.exe"
     assert result["suspicious"] is True
     assert result["deviations"][0]["value_name"] == "Userinit"
 
@@ -149,7 +149,7 @@ def test_default_winlogon_values_are_not_flagged():
 
 
 def test_registry_persistence_response_keeps_existing_fields_and_adds_winlogon():
-    winlogon = {"values": {"Userinit": "Userinit.exe, JM.exe"}, "suspicious": True}
+    winlogon = {"values": {"Userinit": "userinit.exe, helper.exe"}, "suspicious": True}
     with (
         patch.object(server_module, "get_run_keys", return_value=[{"name": "Updater"}]),
         patch.object(server_module, "get_winlogon_persistence", return_value=winlogon),
