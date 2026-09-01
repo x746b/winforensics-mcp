@@ -540,6 +540,27 @@ class TestSyntheticApmxPatterns:
         assert result["risk_level"] == "none"
         assert result["patterns_detected"] == 0
 
+    def test_optional_com_apis_do_not_trigger_wmi(self, tmp_path):
+        apis = ["CoCreateInstance", "CoInitialize", "CoUninitialize"]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "com-only.apmx64"
+        f.write_bytes(apmx)
+
+        result = detect_apmx_patterns(str(f))
+        ids = [d["pattern_id"] for d in result["details"]]
+        assert "wmi_execution" not in ids
+
+    def test_required_wmi_apis_still_trigger_wmi(self, tmp_path):
+        apis = ["CoCreateInstance", "CoInitializeEx", "CoUninitialize"]
+        apmx = _build_synthetic_apmx(api_names=apis)
+        f = tmp_path / "wmi.apmx64"
+        f.write_bytes(apmx)
+
+        result = detect_apmx_patterns(str(f))
+        wmi = next(d for d in result["details"] if d["pattern_id"] == "wmi_execution")
+        assert wmi["required_match_count"] == 2
+        assert wmi["optional_apis_matched"] == ["CoUninitialize"]
+
     def test_timeline_ordering(self, tmp_path):
         apis = [
             "OpenProcess",

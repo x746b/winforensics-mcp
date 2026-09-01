@@ -306,6 +306,91 @@ def get_run_keys(hive_path: str | Path) -> list[dict[str, Any]]:
     return results
 
 
+def get_winlogon_persistence(hive_path: str | Path) -> dict[str, Any]:
+    """Inspect Winlogon values that can execute content at interactive logon."""
+    key_path = "Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+    expected_defaults = {
+        "Userinit": "A single userinit.exe entry (optionally fully qualified)",
+        "Shell": "explorer.exe",
+        "AppSetup": "empty or absent",
+        "Taskman": "empty or absent",
+    }
+    result = {
+        "key": key_path,
+        "present": False,
+        "last_write_time": None,
+        "timestamp": None,
+        "values": {name: None for name in expected_defaults},
+        "value_details": {},
+        "expected_defaults": expected_defaults,
+        "deviations": [],
+        "suspicious": False,
+    }
+
+    reg = open_registry_hive(hive_path)
+    try:
+        key = reg.open(key_path)
+    except Registry.RegistryKeyNotFoundException:
+        return result
+
+    result["present"] = True
+    try:
+        timestamp = key.timestamp()
+        if timestamp:
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            result["last_write_time"] = timestamp.isoformat()
+            result["timestamp"] = timestamp.isoformat()
+    except Exception:
+        pass
+
+    canonical_names = {name.lower(): name for name in expected_defaults}
+    try:
+        for value in key.values():
+            canonical = canonical_names.get(value.name().lower())
+            if not canonical:
+                continue
+            parsed = parse_registry_value(value)
+            result["values"][canonical] = parsed["data"]
+            result["value_details"][canonical] = parsed
+    except Exception:
+        pass
+
+    userinit = str(result["values"].get("Userinit") or "")
+    userinit_entries = [entry.strip() for entry in userinit.split(",") if entry.strip()]
+    userinit_basenames = [
+        entry.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+        for entry in userinit_entries
+    ]
+    if userinit and not (len(userinit_basenames) == 1 and userinit_basenames[0] == "userinit.exe"):
+        result["deviations"].append({
+            "value_name": "Userinit",
+            "value": userinit,
+            "reason": "Expected only userinit.exe; additional executables run at logon",
+        })
+
+    shell = str(result["values"].get("Shell") or "")
+    shell_basename = shell.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+    if shell and shell_basename != "explorer.exe":
+        result["deviations"].append({
+            "value_name": "Shell",
+            "value": shell,
+            "reason": "Expected explorer.exe as the interactive shell",
+        })
+
+    for value_name in ("AppSetup", "Taskman"):
+        value_data = result["values"].get(value_name)
+        if value_data not in (None, "", []):
+            result["deviations"].append({
+                "value_name": value_name,
+                "value": value_data,
+                "reason": f"{value_name} is normally empty or absent",
+            })
+
+    result["suspicious"] = bool(result["deviations"])
+    return result
+
+
 def get_services(hive_path: str | Path, include_microsoft: bool = False) -> list[dict[str, Any]]:
     """
     Get Windows services from SYSTEM hive.

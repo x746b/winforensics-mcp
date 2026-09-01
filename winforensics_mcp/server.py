@@ -21,6 +21,7 @@ from .parsers import (
     get_registry_key,
     search_registry_values,
     get_run_keys,
+    get_winlogon_persistence,
     get_services,
     get_usb_devices,
     get_user_accounts,
@@ -395,7 +396,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="registry_get_persistence",
-            description="Get persistence mechanisms (Run keys, services) from registry.",
+            description="Get persistence mechanisms (Run keys, Winlogon values, services) from registry.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2107,12 +2108,16 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json_response(result)
     
     elif name == "registry_get_persistence":
-        result = {"run_keys": [], "services": []}
+        result = {"run_keys": [], "services": [], "winlogon": None}
         if args.get("software_hive"):
             try:
                 result["run_keys"].extend(get_run_keys(args["software_hive"]))
             except Exception as e:
                 result["software_error"] = str(e)
+            try:
+                result["winlogon"] = get_winlogon_persistence(args["software_hive"])
+            except Exception as e:
+                result["winlogon_error"] = str(e)
         if args.get("ntuser_hive"):
             try:
                 result["run_keys"].extend(get_run_keys(args["ntuser_hive"]))

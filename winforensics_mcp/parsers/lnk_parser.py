@@ -6,7 +6,8 @@ and volume information for forensic analysis.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import struct
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,6 +18,10 @@ except ImportError:
     PYLNK_AVAILABLE = False
 
 from ..config import MAX_REGISTRY_RESULTS
+
+
+_LNK_HEADER_SIZE = 0x4C
+_FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 
 
 def check_pylnk_available() -> None:
@@ -31,6 +36,38 @@ def _format_datetime(dt: Optional[datetime]) -> Optional[str]:
     """Format datetime to ISO string"""
     if dt is None:
         return None
+
+
+def _filetime_to_utc_iso(filetime: int) -> Optional[str]:
+    """Convert a raw Windows FILETIME integer directly to UTC."""
+    if not filetime:
+        return None
+    try:
+        microseconds = filetime // 10
+        return (_FILETIME_EPOCH + timedelta(microseconds=microseconds)).isoformat()
+    except (OverflowError, ValueError):
+        return None
+
+
+def _read_lnk_header_timestamps(lnk_path: Path) -> Optional[dict[str, Optional[str]]]:
+    """Read target timestamps from the Shell Link header without host-time conversion."""
+    try:
+        with lnk_path.open("rb") as lnk_file:
+            header = lnk_file.read(_LNK_HEADER_SIZE)
+    except OSError:
+        return None
+
+    if len(header) < _LNK_HEADER_SIZE:
+        return None
+    if struct.unpack_from("<I", header, 0)[0] != _LNK_HEADER_SIZE:
+        return None
+
+    creation, access, modification = struct.unpack_from("<QQQ", header, 0x1C)
+    return {
+        "creation_time_utc": _filetime_to_utc_iso(creation),
+        "access_time_utc": _filetime_to_utc_iso(access),
+        "modification_time_utc": _filetime_to_utc_iso(modification),
+    }
     try:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -114,6 +151,16 @@ def _parse_single_lnk(lnk_path: Path) -> dict[str, Any]:
         except Exception:
             pass
 
+    target_timestamps = _read_lnk_header_timestamps(lnk_path)
+    timestamp_source = "LNK header FILETIME"
+    if target_timestamps is None:
+        target_timestamps = {
+            "creation_time_utc": _format_datetime(lnk.creation_time),
+            "access_time_utc": _format_datetime(lnk.access_time),
+            "modification_time_utc": _format_datetime(lnk.modification_time),
+        }
+        timestamp_source = "pylnk3 decoded datetime fallback"
+
     result = {
         "filename": lnk_path.name,
         "path": str(lnk_path),
@@ -123,10 +170,12 @@ def _parse_single_lnk(lnk_path: Path) -> dict[str, Any]:
         "arguments": lnk.arguments,
         "description": lnk.description,
         "timestamps": {
-            "creation_time": _format_datetime(lnk.creation_time),
-            "modification_time": _format_datetime(lnk.modification_time),
-            "access_time": _format_datetime(lnk.access_time),
+            "creation_time": target_timestamps["creation_time_utc"],
+            "modification_time": target_timestamps["modification_time_utc"],
+            "access_time": target_timestamps["access_time_utc"],
         },
+        "target_timestamps": target_timestamps,
+        "timestamp_source": timestamp_source,
         "target_file_size": lnk.file_size,
         "file_flags": file_flags if file_flags else None,
         "volume_info": _extract_volume_info(lnk),

@@ -196,14 +196,18 @@ def detect_api_patterns(imports: dict[str, list[str]]) -> dict[str, Any]:
         matched = all_apis & all_pattern_apis
         required_matched = all_apis & pattern["required"]
 
-        if len(matched) >= pattern["min_match"]:
+        if len(required_matched) >= pattern["min_match"]:
             missing_required = pattern["required"] - all_apis
+            optional_matched = all_apis & pattern.get("optional", set())
             detected.append({
                 "pattern_name": pattern["name"],
                 "pattern_id": pattern_id,
                 "apis_matched": sorted(matched),
                 "apis_missing": sorted(missing_required) if missing_required else [],
                 "match_count": len(matched),
+                "required_match_count": len(required_matched),
+                "required_apis_matched": sorted(required_matched),
+                "optional_apis_matched": sorted(optional_matched),
                 "min_required": pattern["min_match"],
                 "description": pattern["description"],
                 "mitre_id": pattern["mitre_id"],

@@ -1059,8 +1059,9 @@ def detect_apmx_patterns(
         matched = all_apis & all_pattern_apis
         required_matched = all_apis & pattern["required"]
 
-        if len(matched) >= pattern["min_match"]:
+        if len(required_matched) >= pattern["min_match"]:
             missing_required = pattern["required"] - all_apis
+            optional_matched = all_apis & pattern.get("optional", set())
 
             # Temporal check for tls_callback_execution:
             # Only flag if FLS/TLS APIs appear in the first 200 records AND
@@ -1094,6 +1095,9 @@ def detect_apmx_patterns(
                 "apis_matched": sorted(matched),
                 "apis_missing": sorted(missing_required) if missing_required else [],
                 "match_count": len(matched),
+                "required_match_count": len(required_matched),
+                "required_apis_matched": sorted(required_matched),
+                "optional_apis_matched": sorted(optional_matched),
                 "min_required": pattern["min_match"],
                 "description": pattern["description"],
                 "mitre_id": pattern["mitre_id"],
