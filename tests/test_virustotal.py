@@ -203,6 +203,41 @@ class TestVtClientWithLibrary:
     @patch("winforensics_mcp.parsers.virustotal_client.check_api_key")
     @patch("winforensics_mcp.parsers.virustotal_client._rate_limit")
     @patch("vt.Client")
+    def test_lookup_behavior_is_bounded_and_persisted(
+        self, mock_client_class, mock_rate_limit, mock_check_key, tmp_path
+    ):
+        from winforensics_mcp.parsers.virustotal_client import lookup_behavior
+
+        mock_check_key.return_value = "test-key"
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_json.return_value = {"data": {
+            "dns_lookups": [{"hostname": f"host-{index}.test"} for index in range(6)],
+            "memory_pattern_urls": [f"https://host-{index}.test/api" for index in range(6)],
+            "command_executions": [f"command-{index}" for index in range(6)],
+            "registry_keys_set": [
+                {"key": f"key-{index}", "value": "A" * 1000} for index in range(6)
+            ],
+            "files_written": [f"file-{index}" for index in range(6)],
+        }}
+        mock_client_class.return_value = mock_client
+
+        result = lookup_behavior("d41d8cd98f00b204e9800998ecf8427e", tmp_path, limit=3)
+
+        assert result["found"] is True
+        assert len(result["domains"]) == 3
+        assert len(result["urls"]) == 3
+        assert len(result["command_executions"]) == 3
+        assert len(result["registry_keys_set"][0]["value"]) == 512
+        assert result["counts"]["command_executions"] == 6
+        persisted = Path(result["persisted_results"])
+        assert persisted.parent == tmp_path
+        assert "host-5.test" in persisted.read_text()
+
+    @patch("winforensics_mcp.parsers.virustotal_client.check_api_key")
+    @patch("winforensics_mcp.parsers.virustotal_client._rate_limit")
+    @patch("vt.Client")
     def test_lookup_ip_clean(self, mock_client_class, mock_rate_limit, mock_check_key):
         """Test lookup_ip with clean IP."""
         from winforensics_mcp.parsers.virustotal_client import clear_cache, lookup_ip

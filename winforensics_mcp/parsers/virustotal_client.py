@@ -13,6 +13,7 @@ Features:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 from collections import Counter
@@ -250,6 +251,98 @@ def lookup_hash(file_hash: str) -> dict[str, Any]:
 
     _set_cached(cache_key, result)
     return result
+
+
+def lookup_behavior(
+    file_hash: str,
+    triage_dir: str | Path | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Return a bounded VT behavior summary and optionally persist the full response."""
+    check_vt_available()
+    api_key = check_api_key()
+    file_hash, hash_type = _normalize_hash(file_hash)
+    if hash_type == "unknown":
+        return {
+            "hash": file_hash,
+            "found": False,
+            "error": f"Invalid hash length ({len(file_hash)})",
+        }
+    limit = max(1, min(int(limit), 25))
+    _rate_limit()
+    try:
+        with vt.Client(api_key) as client:
+            response = client.get_json(f"/files/{file_hash}/behaviour_summary")
+    except vt.error.APIError as exc:
+        if "notfound" in str(exc).replace(" ", "").lower():
+            return {"hash": file_hash, "found": False, "message": "Behavior not found"}
+        raise RuntimeError(f"VirusTotal API error: {exc}") from exc
+
+    full = response.get("data", response) if isinstance(response, dict) else {}
+    if not isinstance(full, dict):
+        return {"hash": file_hash, "found": False, "error": "Unexpected VT behavior response"}
+
+    dns = full.get("dns_lookups") if isinstance(full.get("dns_lookups"), list) else []
+    memory_domains = (
+        full.get("memory_pattern_domains")
+        if isinstance(full.get("memory_pattern_domains"), list) else []
+    )
+    memory_urls = (
+        full.get("memory_pattern_urls")
+        if isinstance(full.get("memory_pattern_urls"), list) else []
+    )
+    domains = list(dict.fromkeys(
+        [item.get("hostname") for item in dns if isinstance(item, dict) and item.get("hostname")]
+        + [value for value in memory_domains if isinstance(value, str)]
+    ))
+    urls = list(dict.fromkeys(
+        value for value in memory_urls if isinstance(value, str)
+    ))
+    conversations = full.get("http_conversations")
+    for conversation in (conversations if isinstance(conversations, list) else []):
+        if isinstance(conversation, dict):
+            url = conversation.get("url") or conversation.get("request_url")
+            if url and url not in urls:
+                urls.append(url)
+
+    def bounded(name: str) -> list:
+        value = full.get(name)
+        if not isinstance(value, list):
+            return []
+        compact = []
+        for item in value[:limit]:
+            if isinstance(item, dict):
+                compact.append({
+                    str(key): str(field)[:512]
+                    for key, field in list(item.items())[:8]
+                })
+            else:
+                compact.append(str(item)[:512])
+        return compact
+
+    projected = {
+        "hash": file_hash,
+        "found": True,
+        "domains": [str(value)[:512] for value in domains[:limit]],
+        "urls": [str(value)[:1024] for value in urls[:limit]],
+        "command_executions": bounded("command_executions"),
+        "registry_keys_set": bounded("registry_keys_set"),
+        "files_written": bounded("files_written"),
+        "counts": {
+            name: len(full.get(name, [])) if isinstance(full.get(name), list) else 0
+            for name in (
+                "dns_lookups", "memory_pattern_domains", "memory_pattern_urls",
+                "command_executions", "registry_keys_set", "files_written",
+            )
+        },
+    }
+    if triage_dir is not None:
+        output_dir = Path(triage_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / f"vt-behavior-{file_hash[:12]}.json"
+        output.write_text(json.dumps(response, indent=2, default=str) + "\n", encoding="utf-8")
+        projected["persisted_results"] = str(output)
+    return projected
 
 
 def lookup_ip(ip_address: str) -> dict[str, Any]:

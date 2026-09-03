@@ -239,7 +239,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 
 | Tool | Description |
 |------|-------------|
-| `file_analyze_pe` | Static PE analysis - hashes, imports, exports, packer detection |
+| `file_analyze_pe` | Static PE analysis - hashes, imports, exports, Authenticode program name, packer detection |
 | `disk_parse_prefetch` | Parse Prefetch for execution evidence |
 | `disk_parse_amcache` | Parse Amcache.hve for SHA1 hashes and timestamps |
 | `disk_parse_srum` | Parse SRUDB.dat for app resource and network usage |
@@ -264,6 +264,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 | Tool | Description |
 |------|-------------|
 | `vt_lookup_hash` | Look up file hash (MD5/SHA1/SHA256) on VirusTotal |
+| `vt_lookup_behavior` | Bounded sandbox domains, URLs, commands, registry/file writes; optional full-result persistence |
 | `vt_lookup_ip` | Get IP address reputation and geolocation |
 | `vt_lookup_domain` | Get domain reputation and categorization |
 | `vt_lookup_file` | Calculate file hashes and look up on VirusTotal |

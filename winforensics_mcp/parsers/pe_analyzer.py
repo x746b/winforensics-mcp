@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+import struct
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -11,6 +13,118 @@ try:
     PEFILE_AVAILABLE = True
 except ImportError:
     PEFILE_AVAILABLE = False
+
+
+SPC_SP_OPUS_INFO_OID_DER = bytes.fromhex("060a2b06010401823702010c")
+
+
+def _der_value(data: bytes, offset: int) -> tuple[int, int, int]:
+    if offset + 2 > len(data):
+        raise ValueError("truncated DER value")
+    tag = data[offset]
+    first = data[offset + 1]
+    cursor = offset + 2
+    if first & 0x80:
+        count = first & 0x7F
+        if count == 0 or count > 4 or cursor + count > len(data):
+            raise ValueError("invalid DER length")
+        length = int.from_bytes(data[cursor:cursor + count], "big")
+        cursor += count
+    else:
+        length = first
+    end = cursor + length
+    if end > len(data):
+        raise ValueError("truncated DER content")
+    return tag, cursor, end
+
+
+def _first_context_string(data: bytes, start: int, end: int) -> str | None:
+    cursor = start
+    while cursor < end:
+        try:
+            tag, value_start, value_end = _der_value(data, cursor)
+        except ValueError:
+            return None
+        value = data[value_start:value_end]
+        if tag == 0x80 and value:
+            try:
+                if len(value) % 2 == 0 and all(byte == 0 for byte in value[0::2]):
+                    return value.decode("utf-16-be").rstrip("\x00")
+                if len(value) % 2 == 0 and all(byte == 0 for byte in value[1::2]):
+                    return value.decode("utf-16-le").rstrip("\x00")
+                return value.decode("utf-8").rstrip("\x00")
+            except UnicodeDecodeError:
+                pass
+        if tag & 0x20:
+            found = _first_context_string(data, value_start, value_end)
+            if found:
+                return found
+        cursor = value_end
+    return None
+
+
+def extract_spc_sp_opus_program_name(pkcs7_der: bytes) -> str | None:
+    """Extract the optional programName from a SpcSpOpusInfo attribute."""
+    offset = pkcs7_der.find(SPC_SP_OPUS_INFO_OID_DER)
+    while offset >= 0:
+        value_offset = offset + len(SPC_SP_OPUS_INFO_OID_DER)
+        try:
+            _, start, end = _der_value(pkcs7_der, value_offset)
+            value = _first_context_string(pkcs7_der, start, end)
+            if value:
+                return value
+        except ValueError:
+            pass
+        offset = pkcs7_der.find(SPC_SP_OPUS_INFO_OID_DER, offset + 1)
+    return None
+
+
+def get_authenticode_info(file_path: Path, pe: "pefile.PE") -> dict[str, Any]:
+    """Return bounded Authenticode metadata without claiming trust validity."""
+    result: dict[str, Any] = {"present": False}
+    try:
+        directory = pe.OPTIONAL_HEADER.DATA_DIRECTORY[4]
+        table_offset = int(directory.VirtualAddress)
+        table_size = int(directory.Size)
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return result
+    if table_offset <= 0 or table_size < 8:
+        return result
+
+    data = file_path.read_bytes()
+    if table_offset + 8 > len(data):
+        return result
+    length, revision, certificate_type = struct.unpack_from("<IHH", data, table_offset)
+    if length < 8 or table_offset + length > len(data):
+        return result
+    pkcs7_der = data[table_offset + 8:table_offset + length]
+    result.update({
+        "present": True,
+        "table_offset": hex(table_offset),
+        "table_size": table_size,
+        "revision": hex(revision),
+        "certificate_type": certificate_type,
+    })
+    if program_name := extract_spc_sp_opus_program_name(pkcs7_der):
+        result["program_name"] = program_name
+
+    try:
+        from cryptography.hazmat.primitives.serialization.pkcs7 import load_der_pkcs7_certificates
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            certificates = load_der_pkcs7_certificates(pkcs7_der)
+        result["certificates"] = [
+            {
+                "subject": certificate.subject.rfc4514_string(),
+                "issuer": certificate.issuer.rfc4514_string(),
+                "serial_number": hex(certificate.serial_number),
+            }
+            for certificate in certificates[:5]
+        ]
+    except (ImportError, ValueError):
+        pass
+    return result
 
 
 def check_pefile_available() -> None:
@@ -497,6 +611,7 @@ def analyze_pe(
         if check_signatures:
             packers = detect_packer_signatures(pe)
             suspicious.extend(packers)
+            result["authenticode"] = get_authenticode_info(file_path, pe)
 
         if detail_level in ["standard", "verbose"]:
             api_suspicious = detect_suspicious_imports(imports)

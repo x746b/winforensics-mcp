@@ -55,6 +55,7 @@ from .parsers import (
     yara_list_rules,
     YARA_AVAILABLE,
     vt_lookup_hash,
+    vt_lookup_behavior,
     vt_lookup_ip,
     vt_lookup_domain,
     vt_lookup_file,
@@ -477,7 +478,7 @@ async def list_tools() -> list[Tool]:
         tools.append(
             Tool(
                 name="file_analyze_pe",
-                description="Perform static analysis on Windows PE files (EXE/DLL/SYS). Extracts headers, imports, exports, sections, calculates hashes (MD5/SHA1/SHA256/Imphash), and detects packers/suspicious indicators.",
+                description="Perform static analysis on Windows PE files (EXE/DLL/SYS). Extracts headers, imports, exports, sections, hashes, Authenticode metadata including SpcSpOpusInfo program name, and suspicious indicators.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -495,7 +496,7 @@ async def list_tools() -> list[Tool]:
                         "check_signatures": {
                             "type": "boolean",
                             "default": True,
-                            "description": "Check for known packer/crypter signatures",
+                            "description": "Inspect Authenticode metadata and known packer/crypter signatures",
                         },
                         "detail_level": {
                             "type": "string",
@@ -604,6 +605,34 @@ async def list_tools() -> list[Tool]:
                         "file_hash": {
                             "type": "string",
                             "description": "MD5 (32 chars), SHA1 (40 chars), or SHA256 (64 chars) hash",
+                        },
+                    },
+                    "required": ["file_hash"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="vt_lookup_behavior",
+                description="Return bounded VirusTotal sandbox behavior for a file hash. "
+                           "Projects domains, URLs, commands, registry writes, and file writes; "
+                           "optionally persists the full response under a supplied triage directory. "
+                           "Never uploads a sample.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_hash": {
+                            "type": "string",
+                            "description": "MD5, SHA1, or SHA256 hash",
+                        },
+                        "triage_dir": {
+                            "type": "string",
+                            "description": "Optional directory for the complete behavior response",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Maximum direct items per projected field (1-25)",
                         },
                     },
                     "required": ["file_hash"],
@@ -2207,6 +2236,22 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
         except ValueError as e:
             return json_response({"error": str(e)})
         except RuntimeError as e:
+            return json_response({"error": str(e)})
+
+    elif name == "vt_lookup_behavior":
+        if not VT_AVAILABLE:
+            return json_response({
+                "error": "vt-py library not installed. Install with: pip install vt-py"
+            })
+        try:
+            result = await asyncio.to_thread(
+                vt_lookup_behavior,
+                args["file_hash"],
+                args.get("triage_dir"),
+                args.get("limit", 10),
+            )
+            return json_response(result)
+        except (ValueError, RuntimeError) as e:
             return json_response({"error": str(e)})
 
     elif name == "vt_lookup_ip":

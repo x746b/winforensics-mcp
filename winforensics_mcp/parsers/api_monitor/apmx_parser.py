@@ -58,6 +58,20 @@ def _open_apmx_zip(file_path: str | Path) -> zipfile.ZipFile:
     return zipfile.ZipFile(io.BytesIO(data[pk_offset:]))
 
 
+def _pointer_size(file_path: str | Path) -> int:
+    """Return the capture's call-offset/header pointer size."""
+    return 4 if Path(file_path).suffix.lower() == ".apmx86" else 8
+
+
+def _unpack_call_offsets(calls_data: bytes, pointer_size: int) -> tuple[int, ...]:
+    """Decode the process call-offset table for 32- or 64-bit captures."""
+    if len(calls_data) % pointer_size:
+        raise ValueError("APMX call-offset table has an invalid size")
+    count = len(calls_data) // pointer_size
+    code = "I" if pointer_size == 4 else "Q"
+    return struct.unpack(f"<{count}{code}", calls_data)
+
+
 def _read_utf16le_string(data: bytes, offset: int) -> tuple[str, int]:
     if offset + 4 > len(data):
         return "", offset
@@ -119,15 +133,16 @@ def _get_record_api_name(
     data_blob: bytes,
     rec_offset: int,
     defs_blob: bytes | None,
+    pointer_size: int = 8,
 ) -> str:
     """Get the API name for a record, preferring embedded over definitions-resolved names."""
     # Prefer embedded names
     names = _extract_api_names(rec)
     if names:
-        return names[0]
+        return names[-1] if pointer_size == 4 else names[0]
 
     # Fall back to definitions
-    if defs_blob is not None and len(rec) >= 0x30:
+    if pointer_size == 8 and defs_blob is not None and len(rec) >= 0x30:
         code_addr = struct.unpack_from("<Q", rec, 0x28)[0]
         name = _resolve_name_from_defs(defs_blob, code_addr)
         if name:
@@ -384,7 +399,7 @@ def _parse_param_values(
         # - 5+ slots: first slot is value, rest is type metadata
         if not slots:
             entry["value"] = None
-        elif slot_count == 1:
+        elif len(slots) == 1:
             entry["value"] = slots[0]
         elif slot_count >= 5:
             # Large slot counts = value + type/definition metadata
@@ -467,14 +482,22 @@ def _extract_strings_from_values(values: list[int]) -> list[str]:
 
 
 def _parse_call_record(
-    rec: bytes, record_index: int, defs_blob: bytes | None = None
+    rec: bytes,
+    record_index: int,
+    defs_blob: bytes | None = None,
+    pointer_size: int = 8,
 ) -> dict[str, Any]:
     """Parse a single call record into structured data.
 
     Extracts: record index, parent, timestamp, parameter values (pre/post),
     return value, API names, and embedded strings.
     """
-    if len(rec) < 0x92:
+    param_start = 0x70 if pointer_size == 4 else 0x90
+    timestamp_offset = 0x38 if pointer_size == 4 else 0x48
+    post_size_offset = 0x48 if pointer_size == 4 else 0x58
+    post_pointer_offset = 0x64 if pointer_size == 4 else 0x78
+
+    if len(rec) < param_start + 2:
         return {"call_index": record_index, "error": "record too short"}
 
     result: dict[str, Any] = {"call_index": record_index}
@@ -486,37 +509,43 @@ def _parse_call_record(
     result["parent_index"] = parent if parent != 0xFFFFFFFF else None
 
     # Timestamp
-    filetime = struct.unpack_from("<Q", rec, 0x48)[0]
+    filetime = struct.unpack_from("<Q", rec, timestamp_offset)[0]
     ts = _filetime_to_iso(filetime)
     if ts:
         result["timestamp"] = ts
 
     # Sizes and pointers
     pre_size = struct.unpack_from("<I", rec, 0x20)[0]
-    post_size = struct.unpack_from("<I", rec, 0x58)[0]
-    ptr_78 = struct.unpack_from("<Q", rec, 0x78)[0]
-    has_post = ptr_78 != 0
+    post_size = struct.unpack_from("<I", rec, post_size_offset)[0]
+    pointer_code = "<I" if pointer_size == 4 else "<Q"
+    post_pointer = struct.unpack_from(pointer_code, rec, post_pointer_offset)[0]
+    has_post = post_pointer != 0
 
     # API name: prefer embedded name (higher-level Win32 API), fall back to defs
     defs_name = None
-    if defs_blob is not None and len(rec) >= 0x30:
+    if pointer_size == 8 and defs_blob is not None and len(rec) >= 0x30:
         code_addr = struct.unpack_from("<Q", rec, 0x28)[0]
         defs_name = _resolve_name_from_defs(defs_blob, code_addr)
 
     embedded_names = _extract_api_names(rec)
-    top_api = (embedded_names[0] if embedded_names else None) or defs_name
+    embedded_top = None
+    if embedded_names:
+        embedded_top = embedded_names[-1] if pointer_size == 4 else embedded_names[0]
+    top_api = embedded_top or defs_name
     result["api_name"] = top_api
     result["top_api"] = top_api  # explicit alias — what analysts usually want
     if defs_name and defs_name != top_api:
         result["resolved_api"] = defs_name
         result["native_api"] = defs_name  # backward compat alias
     if len(embedded_names) > 1:
-        result["nested_apis"] = embedded_names[1:]
+        result["nested_apis"] = (
+            embedded_names[:-1] if pointer_size == 4 else embedded_names[1:]
+        )
 
     # Parameter descriptor
-    if 0x90 + 2 <= len(rec):
-        count = rec[0x90]
-        size_field = rec[0x91]
+    if param_start + 2 <= len(rec):
+        count = rec[param_start]
+        size_field = rec[param_start + 1]
         expected_sf = count * 4 + 1
         if size_field != expected_sf or count == 0:
             result["param_count"] = count
@@ -528,20 +557,20 @@ def _parse_call_record(
         if fmt_version >= 8 and count <= 2:
             total_slots = 0
             for p in range(count):
-                do = 0x92 + p * 4
+                do = param_start + 2 + p * 4
                 if do + 4 <= len(rec):
                     total_slots += rec[do + 1] >> 4
             if total_slots > 10:
                 result["param_format"] = "grouped"
 
         # Parse pre-call values
-        pre_block = rec[0x90 : 0x90 + pre_size]
+        pre_block = rec[param_start : param_start + pre_size]
         pre_params = _parse_param_values(pre_block, count, size_field)
 
         # Parse post-call values (if available)
         post_params: list[dict[str, Any]] | None = None
-        if has_post and 0x90 + pre_size + size_field < len(rec):
-            post_start = 0x90 + pre_size
+        if has_post and param_start + pre_size + size_field < len(rec):
+            post_start = param_start + pre_size
             post_block = rec[post_start : post_start + post_size]
             # Verify post block has same descriptor
             if len(post_block) >= 2 and post_block[0] == count and post_block[1] == size_field:
@@ -566,6 +595,8 @@ def _parse_call_record(
             val = pre["value"]
             if isinstance(val, int) and val != 0:
                 pinfo["pre_value_hex"] = f"0x{val:x}"
+            if 1 < len(pre["values"]) <= 16:
+                pinfo["pre_values_hex"] = [f"0x{item:x}" for item in pre["values"]]
 
             # Check for post-call value changes
             if post_params and p_idx < len(post_params):
@@ -573,6 +604,10 @@ def _parse_call_record(
                 pinfo["post_value"] = post["value"]
                 if isinstance(post["value"], int) and post["value"] != 0:
                     pinfo["post_value_hex"] = f"0x{post['value']:x}"
+                if 1 < len(post["values"]) <= 16:
+                    pinfo["post_values_hex"] = [
+                        f"0x{item:x}" for item in post["values"]
+                    ]
                 if pre["value"] != post["value"]:
                     pinfo["changed"] = True
                     # Heuristic: return value is typically the first changed
@@ -644,7 +679,7 @@ def _parse_call_record(
     return result
 
 
-def _parse_process_info(data: bytes) -> dict[str, Any]:
+def _parse_process_info(data: bytes, pointer_size: int = 8) -> dict[str, Any]:
     info: dict[str, Any] = {}
     offset = 0
 
@@ -663,11 +698,13 @@ def _parse_process_info(data: bytes) -> dict[str, Any]:
         info["pid"] = pid
         offset += 4
 
-    # Image base (uint64)
-    if offset + 8 <= len(data):
-        base = struct.unpack_from("<Q", data, offset)[0]
-        info["image_base"] = f"0x{base:016x}"
-        offset += 8
+    # Image base follows the capture architecture.
+    if offset + pointer_size <= len(data):
+        code = "<I" if pointer_size == 4 else "<Q"
+        base = struct.unpack_from(code, data, offset)[0]
+        width = pointer_size * 2
+        info["image_base"] = f"0x{base:0{width}x}"
+        offset += pointer_size
 
     # Process path
     path, offset = _read_utf16le_string(data, offset)
@@ -745,6 +782,7 @@ def parse_apmx(file_path: str | Path) -> dict[str, Any]:
         Dict with capture info, process details, module list, call statistics
     """
     zf = _open_apmx_zip(file_path)
+    pointer_size = _pointer_size(file_path)
     result: dict[str, Any] = {"file": str(file_path)}
 
     # List available entries
@@ -783,7 +821,7 @@ def parse_apmx(file_path: str | Path) -> dict[str, Any]:
         # Process info
         info_key = f"process/{idx}/info"
         if info_key in entry_names:
-            pinfo = _parse_process_info(zf.read(info_key))
+            pinfo = _parse_process_info(zf.read(info_key), pointer_size=pointer_size)
             pinfo["index"] = idx  # canonical 0-based index from ZIP path
             # Remove internal raw field — only expose the 0-based index
             pinfo.pop("_raw_process_index", None)
@@ -792,7 +830,7 @@ def parse_apmx(file_path: str | Path) -> dict[str, Any]:
             calls_key = f"process/{idx}/calls"
             if calls_key in entry_names:
                 calls_data = zf.read(calls_key)
-                pinfo["total_calls"] = len(calls_data) // 8
+                pinfo["total_calls"] = len(calls_data) // pointer_size
 
             result["processes"].append(pinfo)
 
@@ -859,8 +897,9 @@ def get_apmx_calls(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     # Convert time range to FILETIME for fast comparison
     ft_start = _iso_to_filetime(time_range_start) if time_range_start else None
@@ -876,14 +915,17 @@ def get_apmx_calls(
         rec = api_data[off:next_off]
 
         # Time range filter (timestamp at offset 0x48)
-        if (ft_start is not None or ft_end is not None) and len(rec) >= 0x50:
-            filetime = struct.unpack_from("<Q", rec, 0x48)[0]
+        timestamp_offset = 0x38 if pointer_size == 4 else 0x48
+        if (ft_start is not None or ft_end is not None) and len(rec) >= timestamp_offset + 8:
+            filetime = struct.unpack_from("<Q", rec, timestamp_offset)[0]
             if ft_start is not None and filetime < ft_start:
                 continue
             if ft_end is not None and filetime > ft_end:
                 continue
 
-        api_name = _get_record_api_name(rec, api_data, off, defs_blob)
+        api_name = _get_record_api_name(
+            rec, api_data, off, defs_blob, pointer_size=pointer_size
+        )
         embedded_names = _extract_api_names(rec)
 
         if not api_name and not embedded_names:
@@ -954,8 +996,9 @@ def get_apmx_api_stats(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     top_level_counts: Counter[str] = Counter()
     all_api_counts: Counter[str] = Counter()
@@ -965,14 +1008,18 @@ def get_apmx_api_stats(
         next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
         rec = api_data[off:next_off]
 
-        api_name = _get_record_api_name(rec, api_data, off, defs_blob)
+        api_name = _get_record_api_name(
+            rec, api_data, off, defs_blob, pointer_size=pointer_size
+        )
         embedded_names = _extract_api_names(rec)
 
         if api_name:
             top_level_counts[api_name] += 1
             all_api_counts[api_name] += 1
         elif embedded_names:
-            top_level_counts[embedded_names[0]] += 1
+            top_level_counts[
+                embedded_names[-1] if pointer_size == 4 else embedded_names[0]
+            ] += 1
 
         for n in embedded_names:
             all_api_counts[n] += 1
@@ -1024,8 +1071,9 @@ def detect_apmx_patterns(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     # Collect ALL unique API names seen in the capture (top-level only for pattern matching)
     all_apis: set[str] = set()
@@ -1037,7 +1085,9 @@ def detect_apmx_patterns(
         next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
         rec = api_data[off:next_off]
 
-        api_name = _get_record_api_name(rec, api_data, off, defs_blob)
+        api_name = _get_record_api_name(
+            rec, api_data, off, defs_blob, pointer_size=pointer_size
+        )
         embedded_names = _extract_api_names(rec)
 
         names = set()
@@ -1178,8 +1228,9 @@ def get_apmx_call_details(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     records: list[dict[str, Any]] = []
 
@@ -1190,7 +1241,9 @@ def get_apmx_call_details(
                 off = offsets_arr[idx]
                 next_off = offsets_arr[idx + 1] if idx + 1 < num_records else len(api_data)
                 rec = api_data[off:next_off]
-                parsed = _parse_call_record(rec, idx, defs_blob=defs_blob)
+                parsed = _parse_call_record(
+                    rec, idx, defs_blob=defs_blob, pointer_size=pointer_size
+                )
                 records.append(parsed)
     else:
         # Filtered iteration
@@ -1202,7 +1255,9 @@ def get_apmx_call_details(
             next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
             rec = api_data[off:next_off]
 
-            api_name = _get_record_api_name(rec, api_data, off, defs_blob)
+            api_name = _get_record_api_name(
+                rec, api_data, off, defs_blob, pointer_size=pointer_size
+            )
             embedded_names = _extract_api_names(rec)
 
             if not api_name and not embedded_names:
@@ -1218,7 +1273,9 @@ def get_apmx_call_details(
                 skipped += 1
                 continue
 
-            parsed = _parse_call_record(rec, i, defs_blob=defs_blob)
+            parsed = _parse_call_record(
+                rec, i, defs_blob=defs_blob, pointer_size=pointer_size
+            )
             records.append(parsed)
 
             if len(records) >= limit:
@@ -1309,8 +1366,9 @@ def correlate_apmx_handles(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     # First pass: collect handle-producing records and their return values
     handle_sources: dict[int, dict[str, Any]] = {}  # handle_value → record info
@@ -1324,7 +1382,7 @@ def correlate_apmx_handles(
         # Check both embedded and definitions-resolved names against target set
         embedded = _extract_api_names(rec)
         defs_name = None
-        if defs_blob is not None and len(rec) >= 0x30:
+        if pointer_size == 8 and defs_blob is not None and len(rec) >= 0x30:
             code_addr = struct.unpack_from("<Q", rec, 0x28)[0]
             defs_name = _resolve_name_from_defs(defs_blob, code_addr)
 
@@ -1337,7 +1395,9 @@ def correlate_apmx_handles(
         if not all_names & target_set:
             continue
 
-        parsed = _parse_call_record(rec, i, defs_blob=defs_blob)
+        parsed = _parse_call_record(
+            rec, i, defs_blob=defs_blob, pointer_size=pointer_size
+        )
         all_records.append(parsed)
 
         api_name = parsed.get("api_name", "")
@@ -1690,8 +1750,9 @@ def search_apmx_params(
     defs_blob = zf.read("definitions") if "definitions" in entry_names else None
     zf.close()
 
-    num_records = len(calls_data) // 8
-    offsets_arr = struct.unpack(f"<{num_records}Q", calls_data)
+    pointer_size = _pointer_size(file_path)
+    offsets_arr = _unpack_call_offsets(calls_data, pointer_size)
+    num_records = len(offsets_arr)
 
     is_int_search = isinstance(value, int)
     str_lower = str(value).lower() if not is_int_search else None
@@ -1703,10 +1764,13 @@ def search_apmx_params(
         next_off = offsets_arr[i + 1] if i + 1 < num_records else len(api_data)
         rec = api_data[off:next_off]
 
-        if len(rec) < 0x92:
+        minimum_record = 0x72 if pointer_size == 4 else 0x92
+        if len(rec) < minimum_record:
             continue
 
-        parsed = _parse_call_record(rec, i, defs_blob=defs_blob)
+        parsed = _parse_call_record(
+            rec, i, defs_blob=defs_blob, pointer_size=pointer_size
+        )
         params = parsed.get("parameters", [])
         matched_params: list[dict[str, Any]] = []
 

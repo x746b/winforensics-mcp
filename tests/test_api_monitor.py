@@ -352,11 +352,16 @@ def _build_synthetic_apmx(
         path_encoded = path.encode("utf-16-le")
         cmdline = f'"{path}"'
         cmdline_encoded = cmdline.encode("utf-16-le")
+        image_base = (
+            struct.pack("<I", 0x00400000)
+            if architecture == "32"
+            else struct.pack("<Q", 0x7FF700000000)
+        )
         pinfo = (
             struct.pack("<I", 0)           # process_index
             + struct.pack("<I", 0)         # unknown
             + struct.pack("<I", 1234)      # PID
-            + struct.pack("<Q", 0x7FF700000000)  # image base
+            + image_base
             + struct.pack("<I", len(path)) + path_encoded
             + struct.pack("<I", len(cmdline)) + cmdline_encoded
         )
@@ -373,8 +378,8 @@ def _build_synthetic_apmx(
             record = b"\x00" * 16 + name_block + b"\x00" * 8
             data_blob.extend(record)
 
-        # calls: uint64 array of offsets
-        calls_data = struct.pack(f"<{len(offsets)}Q", *offsets)
+        offset_code = "I" if architecture == "32" else "Q"
+        calls_data = struct.pack(f"<{len(offsets)}{offset_code}", *offsets)
         zf.writestr("process/0/calls", calls_data)
         zf.writestr("process/0/data", bytes(data_blob))
 
@@ -418,12 +423,21 @@ class TestSyntheticApmxParse:
         assert "ntdll.dll" in result["module_list"][0]
 
     def test_32bit_architecture(self, tmp_path):
-        apmx = _build_synthetic_apmx(architecture="32")
+        apmx = _build_synthetic_apmx(
+            architecture="32", api_names=["CreateFileW", "ReadFile"]
+        )
         f = tmp_path / "test.apmx86"
         f.write_bytes(apmx)
 
         result = parse_apmx(str(f))
         assert result["architecture"] == "32-bit"
+        assert result["processes"][0]["process_name"] == "test.exe"
+        assert result["processes"][0]["total_calls"] == 2
+
+        calls = get_apmx_calls(str(f), api_filter="ReadFile")
+        assert calls["total_records"] == 2
+        assert calls["returned"] == 1
+        assert calls["calls"][0]["top_api"] == "ReadFile"
 
     def test_file_not_found(self):
         with pytest.raises(FileNotFoundError):
@@ -979,6 +993,20 @@ class TestParseCallRecord:
         assert result["param_count"] == 1
         assert len(result["parameters"]) == 1
         assert result["parameters"][0]["pre_value"] == 42
+
+    def test_bounded_multi_slot_values_are_visible(self):
+        rec = _build_call_record(
+            api_name="CryptImportKey",
+            pre_params=[(0x50, [1, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF])],
+        )
+        result = _parse_call_record(rec, 0)
+        assert result["parameters"][0]["pre_values_hex"] == [
+            "0x1",
+            "0xdeadbeef",
+            "0xdeadbeef",
+            "0xdeadbeef",
+            "0xdeadbeef",
+        ]
 
     def test_return_value_detection(self):
         """Return value detected from pre/post comparison."""

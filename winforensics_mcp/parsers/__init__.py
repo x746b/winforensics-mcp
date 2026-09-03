@@ -108,6 +108,7 @@ from .yara_scanner import (
 
 from .virustotal_client import (
     lookup_hash as vt_lookup_hash,
+    lookup_behavior as vt_lookup_behavior,
     lookup_ip as vt_lookup_ip,
     lookup_domain as vt_lookup_domain,
     lookup_file as vt_lookup_file,
@@ -241,6 +242,7 @@ __all__ = [
     "YARA_AVAILABLE",
     # VirusTotal
     "vt_lookup_hash",
+    "vt_lookup_behavior",
     "vt_lookup_ip",
     "vt_lookup_domain",
     "vt_lookup_file",
