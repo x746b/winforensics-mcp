@@ -1447,7 +1447,12 @@ async def list_tools() -> list[Tool]:
         tools.append(
             Tool(
                 name="disk_parse_srum",
-                description="Parse SRUDB.dat for application resource usage including CPU time, network bytes sent/received, and foreground time. Answers: How long did this program run? What was its network activity?",
+                description=(
+                    "Parse SRUDB.dat for raw application resource counters and network bytes "
+                    "sent/received. Supports application and UTC time filters, derived MB/MiB, "
+                    "and optional network aggregation. Resource counters are not interpreted "
+                    "as elapsed runtime."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1463,20 +1468,47 @@ async def list_tools() -> list[Tool]:
                         },
                         "app_filter": {
                             "type": "string",
-                            "description": "Filter by application name (case-insensitive substring)",
+                            "description": "Application filter; interpreted using app_match_mode",
+                        },
+                        "app_match_mode": {
+                            "type": "string",
+                            "enum": ["substring", "exact_basename", "exact_path", "regex"],
+                            "default": "substring",
+                            "description": (
+                                "Case-insensitive matching. Exact basename compares only the "
+                                "executable filename; exact path normalizes case and slashes. "
+                                "Regex searches the raw application name and executable."
+                            ),
+                        },
+                        "aggregate_by": {
+                            "type": "string",
+                            "enum": [
+                                "none", "application", "user", "interface",
+                                "application_user", "application_interface",
+                            ],
+                            "default": "none",
+                            "description": (
+                                "Network tables only (network_data_usage or all). Adds aggregates "
+                                "over all matching rows, independent of the entries limit. "
+                                "Existing entries remain in the response."
+                            ),
                         },
                         "time_range_start": {
                             "type": "string",
-                            "description": "ISO format datetime - filter entries after this time",
+                            "description": "Inclusive ISO start for both tables; naive times use UTC",
                         },
                         "time_range_end": {
                             "type": "string",
-                            "description": "ISO format datetime - filter entries before this time",
+                            "description": "Inclusive ISO end for both tables; naive times use UTC",
                         },
                         "limit": {
                             "type": "integer",
                             "default": MAX_AMCACHE_RESULTS,
-                            "description": "Maximum number of entries to return",
+                            "minimum": 0,
+                            "description": (
+                                "Maximum entries; all uses limit // 2 per table. "
+                                "Does not limit aggregate inputs."
+                            ),
                         },
                     },
                     "required": ["srum_path"],
@@ -2732,6 +2764,8 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             time_range_start=args.get("time_range_start"),
             time_range_end=args.get("time_range_end"),
             limit=args.get("limit", MAX_AMCACHE_RESULTS),
+            app_match_mode=args.get("app_match_mode", "substring"),
+            aggregate_by=args.get("aggregate_by", "none"),
         )
         return json_response(result)
 
