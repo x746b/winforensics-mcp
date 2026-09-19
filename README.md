@@ -117,13 +117,13 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
 
-Windows Search parsing uses an optional, explicitly built SIDR 0.9.2 sidecar. Source installs can build the pinned revision into the ignored `.tools/` directory:
+Windows Search parsing uses SIDR 0.9.2. The source repository includes a stripped Linux ARM64 release at `.tools/sidr`, built from the pinned commit recorded in `.tools/sidr.manifest.json`. Other architectures can rebuild that exact revision with:
 
 ```bash
 bash scripts/build_sidr.sh
 ```
 
-The server discovers SIDR from an explicit tool argument, `WINFORENSICS_SIDR_PATH`, `.tools/sidr`, or `PATH`, in that order. It never downloads or builds executables at runtime. Without SIDR, `windows_search_parse` uses a clearly marked partial `pyesedb` fallback that cannot recover every compressed long value.
+The server discovers SIDR from an explicit tool argument, `WINFORENSICS_SIDR_PATH`, `.tools/sidr`, or `PATH`, in that order. It never downloads or builds executables at runtime. The bundled binary requires Linux ARM64; build or supply SIDR 0.9.2 separately on other platforms. Without SIDR, `windows_search_parse` uses a clearly marked partial `pyesedb` fallback that cannot recover every compressed long value.
 
 ### Verify
 
@@ -401,13 +401,13 @@ sudo apt install detect-it-easy
 
 ### SIDR not found
 
-For a source checkout, build the pinned SIDR revision with:
+Source checkouts on Linux ARM64 include a stripped SIDR release. To rebuild the pinned revision, or to build for another host architecture, run:
 
 ```bash
 bash scripts/build_sidr.sh
 ```
 
-For another installation, set `WINFORENSICS_SIDR_PATH` to a SIDR 0.9.2 executable. The parser reports the executable path, version, SHA-256, database state, extraction completeness, and evidence hashes in every response.
+For another installation, set `WINFORENSICS_SIDR_PATH` to a SIDR 0.9.2 executable. The parser reports the executable path, version, SHA-256, database state, extraction completeness, and evidence hashes in every response. See `.tools/SIDR-LICENSE` for the bundled sidecar's Apache-2.0 license.
 
 ### Remove MCP Server
 

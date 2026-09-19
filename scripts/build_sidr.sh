@@ -12,5 +12,24 @@ test -f "$sidr_build/src/Cargo.lock"
 cargo build --manifest-path "$sidr_build/src/Cargo.toml" --locked --release --bin sidr
 mkdir -p "$repo_root/.tools"
 install -m 0755 "$sidr_build/src/target/release/sidr" "$repo_root/.tools/sidr"
+strip --strip-unneeded "$repo_root/.tools/sidr"
 "$repo_root/.tools/sidr" --version
-sha256sum "$repo_root/.tools/sidr"
+sidr_sha256="$(sha256sum "$repo_root/.tools/sidr" | awk '{print $1}')"
+sidr_size="$(stat -c %s "$repo_root/.tools/sidr")"
+sidr_target="$(rustc -vV | awk '/^host:/ {print $2}')"
+cat > "$repo_root/.tools/sidr.manifest.json" <<EOF
+{
+  "name": "sidr",
+  "version": "0.9.2",
+  "source": "https://github.com/strozfriedberg/sidr.git",
+  "commit": "$sidr_commit",
+  "target": "$sidr_target",
+  "profile": "release",
+  "cargo_locked": true,
+  "stripped": true,
+  "sha256": "$sidr_sha256",
+  "size_bytes": $sidr_size,
+  "build_command": "cargo build --locked --release --bin sidr"
+}
+EOF
+printf '%s  %s\n' "$sidr_sha256" "$repo_root/.tools/sidr"

@@ -51,5 +51,8 @@ Thumbs.db
 *.db-shm
 *.db-wal
 
-# Optional locally built sidecars
-.tools/
+# Optional locally built sidecars; retain the reviewed ARM64 SIDR release.
+.tools/*
+!.tools/sidr
+!.tools/sidr.manifest.json
+!.tools/SIDR-LICENSE
