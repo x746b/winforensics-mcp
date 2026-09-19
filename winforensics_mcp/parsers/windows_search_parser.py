@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -51,12 +52,18 @@ def _diagnostic(result: dict, message: str) -> None:
 
 
 def _resolve_sidr(explicit: str | None) -> tuple[Path | None, list[str]]:
+    machine = platform.machine().casefold()
+    bundled_name = None
+    if machine in {"aarch64", "arm64"}:
+        bundled_name = "sidr"
+    elif machine in {"x86_64", "amd64"}:
+        bundled_name = "sidr_x86"
     candidates = (
         [explicit]
         if explicit
         else [
             os.environ.get("WINFORENSICS_SIDR_PATH"),
-            str(REPO_ROOT / ".tools" / "sidr"),
+            str(REPO_ROOT / ".tools" / bundled_name) if bundled_name else None,
             shutil.which("sidr"),
         ]
     )

@@ -117,13 +117,13 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
 
-Windows Search parsing uses SIDR 0.9.2. The source repository includes a stripped Linux ARM64 release at `.tools/sidr`, built from the pinned commit recorded in `.tools/sidr.manifest.json`. Other architectures can rebuild that exact revision with:
+Windows Search parsing uses SIDR 0.9.2. The source repository includes stripped Linux releases for ARM64 (`.tools/sidr`) and x86_64 (`.tools/sidr_x86`), built from the pinned commit recorded in their adjacent manifests. Either architecture can rebuild that exact revision with:
 
 ```bash
 bash scripts/build_sidr.sh
 ```
 
-The server discovers SIDR from an explicit tool argument, `WINFORENSICS_SIDR_PATH`, `.tools/sidr`, or `PATH`, in that order. It never downloads or builds executables at runtime. The bundled binary requires Linux ARM64; build or supply SIDR 0.9.2 separately on other platforms. Without SIDR, `windows_search_parse` uses a clearly marked partial `pyesedb` fallback that cannot recover every compressed long value.
+The server discovers SIDR from an explicit tool argument, `WINFORENSICS_SIDR_PATH`, the architecture-matched bundled binary, or `PATH`, in that order. It never downloads or builds executables at runtime. Build or supply SIDR 0.9.2 separately on unsupported platforms. Without SIDR, `windows_search_parse` uses a clearly marked partial `pyesedb` fallback that cannot recover every compressed long value.
 
 ### Verify
 
@@ -401,7 +401,7 @@ sudo apt install detect-it-easy
 
 ### SIDR not found
 
-Source checkouts on Linux ARM64 include a stripped SIDR release. To rebuild the pinned revision, or to build for another host architecture, run:
+Source checkouts include stripped SIDR releases for Linux ARM64 and x86_64. To rebuild the pinned revision for the current Rust target, run:
 
 ```bash
 bash scripts/build_sidr.sh

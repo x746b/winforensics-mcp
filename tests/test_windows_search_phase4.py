@@ -228,6 +228,23 @@ def test_discovery_precedence(tmp_path, monkeypatch):
     assert parser._resolve_sidr(str(tmp_path / "absent"))[0] is None
 
 
+def test_bundled_sidecar_selection_is_architecture_aware(tmp_path, monkeypatch):
+    tools = tmp_path / ".tools"
+    tools.mkdir()
+    arm = tools / "sidr"
+    x86 = tools / "sidr_x86"
+    for binary in (arm, x86):
+        binary.write_text("binary")
+        binary.chmod(0o755)
+    monkeypatch.setattr(parser, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("WINFORENSICS_SIDR_PATH", raising=False)
+    monkeypatch.setattr(parser.shutil, "which", lambda name: None)
+    monkeypatch.setattr(parser.platform, "machine", lambda: "aarch64")
+    assert parser._resolve_sidr(None)[0] == arm
+    monkeypatch.setattr(parser.platform, "machine", lambda: "x86_64")
+    assert parser._resolve_sidr(None)[0] == x86
+
+
 def test_no_backend_actionable(evidence, monkeypatch):
     monkeypatch.setattr(parser, "_resolve_sidr", lambda path: (None, ["/missing/sidr"]))
     monkeypatch.setattr(parser, "pyesedb", None)

@@ -55,4 +55,6 @@ Thumbs.db
 .tools/*
 !.tools/sidr
 !.tools/sidr.manifest.json
+!.tools/sidr_x86
+!.tools/sidr_x86.manifest.json
 !.tools/SIDR-LICENSE
