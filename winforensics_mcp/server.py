@@ -35,6 +35,7 @@ from .parsers import (
     PYSCCA_AVAILABLE,
     parse_amcache,
     parse_srum,
+    parse_windows_search,
     PYESEDB_AVAILABLE,
     parse_mft,
     find_timestomped_files,
@@ -1442,6 +1443,47 @@ async def list_tools() -> list[Tool]:
         )
     )
 
+    tools.append(
+        Tool(
+            name="windows_search_parse",
+            description=(
+                "Parse an explicit Windows Search EDB using SIDR 0.9.2. Returns file, internet "
+                "history, and activity history reports with extraction completeness and evidence "
+                "hashes. Uses a partial PropertyStore fallback if SIDR is absent. Text filters "
+                "are case-insensitive substrings combined with AND. Time bounds are inclusive "
+                "UTC: file DateModified, internet Link_DateVisited, activity StartTime. "
+                "Incomplete zero results are not conclusive."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "edb_path": {"type": "string",
+                                 "description": "Explicit Windows Search EDB file"},
+                    "sidr_path": {"type": "string", "description": "Optional SIDR executable path"},
+                    "report_type": {"type": "string", "default": "all",
+                                    "enum": ["all", "file", "internet_history",
+                                             "activity_history"]},
+                    "query": {"type": "string", "description": "Search all raw report fields"},
+                    "path_filter": {"type": "string"},
+                    "filename_filter": {"type": "string"},
+                    "content_filter": {"type": "string",
+                                       "description": "Search System_Search_AutoSummary"},
+                    "work_id": {"type": "integer"},
+                    "time_start": {"type": "string",
+                                   "description": "ISO timestamp; naive means UTC"},
+                    "time_end": {"type": "string", "description": "ISO timestamp; naive means UTC"},
+                    "offset": {"type": "integer", "minimum": 0, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
+                    "fields": {"type": "array", "maxItems": 64, "items": {"type": "string"},
+                               "description": "Raw field names plus report_type"},
+                    "timeout": {"type": "integer", "minimum": 1, "maximum": 3600, "default": 120},
+                },
+                "required": ["edb_path"],
+                "additionalProperties": False,
+            },
+        )
+    )
+
     # SRUM parsing tool (if libesedb available)
     if PYESEDB_AVAILABLE:
         tools.append(
@@ -2752,6 +2794,10 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             time_range_end=args.get("time_range_end"),
             limit=args.get("limit", MAX_AMCACHE_RESULTS),
         )
+        return json_response(result)
+
+    elif name == "windows_search_parse":
+        result = parse_windows_search(**args)
         return json_response(result)
 
     elif name == "disk_parse_srum":

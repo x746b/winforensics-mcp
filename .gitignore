@@ -50,3 +50,6 @@ Thumbs.db
 # SQLite WAL/SHM files
 *.db-shm
 *.db-wal
+
+# Optional locally built sidecars
+.tools/

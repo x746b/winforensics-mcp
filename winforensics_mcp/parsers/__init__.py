@@ -1,3 +1,5 @@
+from .windows_search_parser import parse_windows_search
+
 from .evtx_parser import (
     get_evtx_events,
     list_evtx_files,
@@ -159,6 +161,7 @@ from .api_monitor import (
 )
 
 __all__ = [
+    "parse_windows_search",
     # EVTX
     "get_evtx_events",
     "list_evtx_files",

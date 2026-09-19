@@ -2,7 +2,7 @@
 
 # Windows Forensics MCP Server
 
-> **Windows DFIR from Linux** - A comprehensive forensics toolkit designed entirely for Linux environments with zero Windows tool dependencies. Parse Windows artifacts natively using pure Python libraries.
+> **Windows DFIR from Linux** - A comprehensive forensics toolkit designed for Linux environments with no Windows runtime dependencies. Parse Windows artifacts natively, with an optional Rust SIDR sidecar for Windows Search.
 
 ---
 
@@ -19,7 +19,7 @@
 | Category | Capabilities |
 |----------|--------------|
 | **EVTX Logs** | Parse Windows Event Logs with filtering, search, and pre-built security queries |
-| **Registry** | Analyze SAM, SYSTEM, SOFTWARE, SECURITY, NTUSER.DAT hives |
+| **Registry** | Analyze SAM, SYSTEM, SOFTWARE, SECURITY, and NTUSER.DAT; paginated queries, normalized FILETIMEs, and USBSTOR/WPD correlation |
 | **Remote Collection** | Collect artifacts via WinRM (password or pass-the-hash) |
 
 ### Execution Artifacts
@@ -28,7 +28,7 @@
 | **PE Analysis** | Static analysis with hashes (MD5/SHA1/SHA256/imphash), imports, exports, packer detection |
 | **Prefetch** | Execution evidence with run counts, timestamps, loaded files |
 | **Amcache** | SHA1 hashes and first-seen timestamps from Amcache.hve |
-| **SRUM** | Application resource usage, CPU time, network activity from SRUDB.dat |
+| **SRUM** | Exact application/time filtering, raw resource counters, network MB/MiB totals, and optional aggregation from SRUDB.dat |
 
 ### File System Artifacts
 | Category | Capabilities |
@@ -44,6 +44,7 @@
 | **LNK Files** | Windows shortcut analysis for recently accessed files |
 | **ShellBags** | Folder navigation history from both UsrClass.dat and NTUSER.DAT, incl. UNC shares and browsed archive interiors (libfwsi) |
 | **RecentDocs** | Registry-based recent document tracking |
+| **Windows Search** | SIDR-backed `Windows.edb` file, internet-history, activity-history, and `System.Search.AutoSummary` recovery |
 
 ### Network Forensics
 | Category | Capabilities |
@@ -115,6 +116,14 @@ uv sync
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
+
+Windows Search parsing uses an optional, explicitly built SIDR 0.9.2 sidecar. Source installs can build the pinned revision into the ignored `.tools/` directory:
+
+```bash
+bash scripts/build_sidr.sh
+```
+
+The server discovers SIDR from an explicit tool argument, `WINFORENSICS_SIDR_PATH`, `.tools/sidr`, or `PATH`, in that order. It never downloads or builds executables at runtime. Without SIDR, `windows_search_parse` uses a clearly marked partial `pyesedb` fallback that cannot recover every compressed long value.
 
 ### Verify
 
@@ -242,7 +251,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 | `file_analyze_pe` | Static PE analysis - hashes, imports, exports, Authenticode program name, packer detection |
 | `disk_parse_prefetch` | Parse Prefetch for execution evidence |
 | `disk_parse_amcache` | Parse Amcache.hve for SHA1 hashes and timestamps |
-| `disk_parse_srum` | Parse SRUDB.dat for app resource and network usage |
+| `disk_parse_srum` | Parse SRUDB.dat with exact/regex app filters, UTC ranges, derived network units, and optional aggregation |
 
 ### Malware Detection (YARA)
 
@@ -319,6 +328,7 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 | `browser_get_history` | Parse Edge/Chrome/Firefox history and downloads |
 | `user_parse_lnk_files` | Parse Windows shortcuts for target paths |
 | `user_parse_shellbags` | Parse ShellBags (UsrClass.dat + NTUSER.DAT) for folder navigation, network shares and archive browsing |
+| `windows_search_parse` | Parse an explicit `Windows.edb` with SIDR; filter and paginate file, internet, activity, and indexed-content records |
 
 ### Event Logs
 
@@ -337,9 +347,10 @@ The `hunt_ioc` tool searches Prefetch, Amcache, SRUM, MFT, USN, Browser, EVTX, a
 |------|-------------|
 | `registry_get_key` | Get specific key and values |
 | `registry_search` | Search values by pattern |
+| `registry_query` | Paginated exact/substring/regex registry query with subtree scope, field projection, and diagnostics |
 | `registry_get_persistence` | Get Run keys and services |
 | `registry_get_users` | Get user accounts from SAM |
-| `registry_get_usb_history` | Get USB device history |
+| `registry_get_usb_history` | Correlate USBSTOR identity, physical serial, WPD device names, and secondary volume labels |
 | `registry_get_system_info` | Get OS version, hostname, timezone |
 | `registry_get_network` | Get network configuration |
 
@@ -388,6 +399,16 @@ sudo apt install detect-it-easy
 # Or download from https://github.com/horsicq/DIE-engine/releases
 ```
 
+### SIDR not found
+
+For a source checkout, build the pinned SIDR revision with:
+
+```bash
+bash scripts/build_sidr.sh
+```
+
+For another installation, set `WINFORENSICS_SIDR_PATH` to a SIDR 0.9.2 executable. The parser reports the executable path, version, SHA-256, database state, extraction completeness, and evidence hashes in every response.
+
 ### Remove MCP Server
 
 ```bash
@@ -398,7 +419,7 @@ claude mcp remove winforensics-mcp --scope user
 
 ## License
 
-Credits: [omerbenamram/evtx](https://github.com/omerbenamram/evtx) (Rust EVTX parser), [Rohitab Batra](http://www.rohitab.com/apimonitor) (API Monitor), [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (YARA rules), [horsicq/DIE-engine](https://github.com/horsicq/DIE-engine) (Detect It Easy)
+Credits: [omerbenamram/evtx](https://github.com/omerbenamram/evtx) (Rust EVTX parser), [strozfriedberg/sidr](https://github.com/strozfriedberg/sidr) (Windows Search), [Rohitab Batra](http://www.rohitab.com/apimonitor) (API Monitor), [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (YARA rules), [horsicq/DIE-engine](https://github.com/horsicq/DIE-engine) (Detect It Easy)
 
 Core `winforensics-mcp` code is MIT licensed. See [LICENSE](LICENSE).
 
