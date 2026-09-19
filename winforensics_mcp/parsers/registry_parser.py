@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 import struct
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Generator, Optional, Sequence
+from typing import Any, Optional
 
 try:
     from Registry import Registry
@@ -11,9 +13,19 @@ try:
 except ImportError:
     REGISTRY_AVAILABLE = False
 
-from ..config import (
-    MAX_REGISTRY_RESULTS,
-    FORENSIC_REGISTRY_KEYS,
+from ..config import MAX_REGISTRY_RESULTS
+
+FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+# QWORDs with these documented meanings are timestamps, unlike arbitrary counters.
+FILETIME_VALUE_NAMES = frozenset({
+    "lastusedtimestart", "lastusedtimestop", "lastarrivaldate", "lastremovaldate",
+    "installdate", "firstinstalldate", "lastarrivaltime", "lastremovaltime",
+    "installtime", "firstinstalltime", "devpkey_device_lastarrivaldate",
+    "devpkey_device_lastremovaldate", "devpkey_device_installdate",
+    "devpkey_device_firstinstalldate",
+})
+REGISTRY_QUERY_FIELDS = (
+    "name", "type", "data", "data_raw", "data_utc", "key_path",
 )
 
 
@@ -27,15 +39,22 @@ def check_registry_available() -> None:
 
 def filetime_to_datetime(filetime: int) -> Optional[datetime]:
     """Convert Windows FILETIME to datetime"""
-    if filetime == 0:
+    if filetime <= 0:
         return None
     try:
-        # FILETIME is 100-nanosecond intervals since January 1, 1601
-        EPOCH_DIFF = 116444736000000000  # Difference between 1601 and 1970 in 100ns
-        timestamp = (filetime - EPOCH_DIFF) / 10000000
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    except (ValueError, OSError):
+        # Integer arithmetic avoids loss of precision from a float Unix timestamp.
+        return FILETIME_EPOCH + timedelta(microseconds=filetime // 10)
+    except (ValueError, OverflowError):
         return None
+
+
+def filetime_to_utc(filetime: int) -> str | None:
+    """Render FILETIME in UTC, retaining its full 100-nanosecond precision."""
+    timestamp = filetime_to_datetime(filetime)
+    if timestamp is None:
+        return None
+    whole_seconds = timestamp.replace(microsecond=0).isoformat().removesuffix("+00:00")
+    return f"{whole_seconds}.{filetime % 10_000_000:07d}+00:00"
 
 
 def parse_registry_key(key, max_depth: int = 10, current_depth: int = 0) -> dict[str, Any]:
@@ -119,6 +138,8 @@ def parse_registry_value(value) -> dict[str, Any]:
                     result["data_raw"] = True
         elif isinstance(data, int):
             result["data"] = data
+            if value.value_type() == 11 and value.name().casefold() in FILETIME_VALUE_NAMES:
+                result["data_utc"] = filetime_to_utc(data)
         elif isinstance(data, list):
             # Multi-string values
             result["data"] = [s.rstrip("\x00") if isinstance(s, str) else s for s in data]
@@ -264,6 +285,158 @@ def search_registry_values(
     
     search_key(reg.root())
     return results
+
+
+def query_registry_values(
+    hive_path: str | Path,
+    pattern: str,
+    search_names: bool = True,
+    search_data: bool = True,
+    case_sensitive: bool = False,
+    match_mode: str = "substring",
+    key_path_prefix: str | None = None,
+    offset: int = 0,
+    limit: int = MAX_REGISTRY_RESULTS,
+    fields: list[str] | None = None,
+    diagnostic_limit: int = 5,
+) -> dict[str, Any]:
+    """Query a registry subtree with pagination and totals over readable values.
+
+    The prefix selects a whole key and its descendants, never similarly named
+    sibling keys. Paths may be hive-relative or include the root key name.
+    Exact matching compares entire value names or individual data strings;
+    regex matching uses ``re.search``. Multi-string entries are matched separately.
+    Traversal follows the immutable hive's key/value order. Read failures are
+    reported separately so a partial scan cannot appear to have complete totals.
+    """
+    if not isinstance(pattern, str):
+        raise ValueError("pattern must be a string")
+    if match_mode not in ("substring", "exact", "regex"):
+        raise ValueError("match_mode must be substring, exact, or regex")
+    for name, value in (
+        ("search_names", search_names), ("search_data", search_data),
+        ("case_sensitive", case_sensitive),
+    ):
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean")
+    if not search_names and not search_data:
+        raise ValueError("At least one of search_names or search_data must be true")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("offset must be a non-negative integer")
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("limit must be an integer between 1 and 1000")
+    if type(diagnostic_limit) is not int or not 0 <= diagnostic_limit <= 20:
+        raise ValueError("diagnostic_limit must be an integer between 0 and 20")
+    if key_path_prefix is not None and not isinstance(key_path_prefix, str):
+        raise ValueError("key_path_prefix must be a string")
+    if fields is not None and (
+        not isinstance(fields, list) or not fields
+        or any(not isinstance(field, str) or field not in REGISTRY_QUERY_FIELDS for field in fields)
+    ):
+        raise ValueError(f"fields must be a non-empty list containing {REGISTRY_QUERY_FIELDS}")
+
+    regex = None
+    if match_mode == "regex":
+        try:
+            regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+        except re.error as exc:
+            raise ValueError(f"Invalid regular expression: {exc}") from exc
+    needle = pattern if case_sensitive else pattern.casefold()
+
+    def matches(text: str) -> bool:
+        if regex is not None:
+            return regex.search(text) is not None
+        candidate = text if case_sensitive else text.casefold()
+        return needle == candidate if match_mode == "exact" else needle in candidate
+
+    def data_strings(data: Any) -> list[str]:
+        if isinstance(data, bytes):
+            try:
+                return [data.decode("utf-16-le").rstrip("\x00")]
+            except UnicodeDecodeError:
+                try:
+                    return [data.decode("utf-8").rstrip("\x00")]
+                except UnicodeDecodeError:
+                    return []
+        if isinstance(data, list):
+            return [item.rstrip("\x00") for item in data if isinstance(item, str)]
+        if isinstance(data, str):
+            return [data.rstrip("\x00")]
+        if isinstance(data, int):
+            return [str(data)]
+        return []
+
+    reg = open_registry_hive(hive_path)
+    root = reg.root()
+    prefix = (key_path_prefix or "").replace("/", "\\").strip("\\")
+    root_name = root.name()
+    if prefix.casefold() == root_name.casefold():
+        prefix = ""
+    elif prefix.casefold().startswith(root_name.casefold() + "\\"):
+        prefix = prefix[len(root_name) + 1:]
+    try:
+        start = reg.open(prefix) if prefix else root
+    except Registry.RegistryKeyNotFoundException as exc:
+        raise KeyError(f"Registry key prefix not found: {key_path_prefix}") from exc
+
+    results = []
+    total_matched = 0
+    read_errors = 0
+    diagnostics = []
+
+    def record_error(path: str, operation: str, exc: Exception) -> None:
+        nonlocal read_errors
+        read_errors += 1
+        if len(diagnostics) < diagnostic_limit:
+            diagnostics.append({"key_path": path, "operation": operation, "error": str(exc)})
+
+    start_path = f"{root_name}\\{prefix}" if prefix else root_name
+    stack = [(start, start_path)]
+    while stack:
+        key, current_path = stack.pop()
+        try:
+            for value in key.values():
+                try:
+                    found = search_names and matches(value.name())
+                    if search_data and not found:
+                        found = any(matches(text) for text in data_strings(value.value()))
+                    if not found:
+                        continue
+                    total_matched += 1
+                    if offset < total_matched <= offset + limit:
+                        row = parse_registry_value(value)
+                        row["key_path"] = current_path
+                        results.append(
+                            {field: row[field] for field in fields if field in row}
+                            if fields is not None else row
+                        )
+                except Exception as exc:
+                    record_error(current_path, "read_value", exc)
+        except Exception as exc:
+            record_error(current_path, "enumerate_values", exc)
+        children = []
+        try:
+            for subkey in key.subkeys():
+                children.append((subkey, f"{current_path}\\{subkey.name()}"))
+        except Exception as exc:
+            record_error(current_path, "enumerate_subkeys", exc)
+        stack.extend(reversed(children))
+
+    returned = len(results)
+    has_more = offset + returned < total_matched
+    return {
+        "results": results,
+        "total_matched": total_matched,
+        "returned": returned,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": offset + returned if has_more else None,
+        "truncated": has_more,
+        "total_matched_complete": read_errors == 0,
+        "read_errors": read_errors,
+        "diagnostics": diagnostics,
+        "diagnostics_truncated": read_errors > len(diagnostics),
+    }
 
 
 def get_run_keys(hive_path: str | Path) -> list[dict[str, Any]]:
@@ -490,7 +663,57 @@ def get_usb_devices(hive_path: str | Path) -> list[dict[str, Any]]:
         control_set = f"ControlSet{current:03d}"
     except Exception:
         control_set = "ControlSet001"
-    
+
+    def device_values(key) -> dict[str, Any]:
+        values = {}
+        for value in key.values():
+            name = value.name().casefold()
+            try:
+                raw = value.value()
+                if name == "containerid" and isinstance(raw, bytes) and len(raw) == 16:
+                    values[name] = "{" + str(uuid.UUID(bytes_le=raw)) + "}"
+                else:
+                    values[name] = parse_registry_value(value)["data"]
+            except Exception:
+                continue
+        return values
+
+    def container_identity(value) -> str | None:
+        try:
+            identifier = uuid.UUID(str(value))
+            return str(identifier) if identifier.int else None
+        except (ValueError, AttributeError):
+            return None
+
+    def instance_path_matches(wpd_id: str, device_class: str, instance_id: str) -> bool:
+        # WPD physical entries encode the complete USBSTOR device path, with
+        # '#' separators. Comparing components avoids serial-prefix collisions.
+        parts = re.split(r"[\\#]", wpd_id.casefold())
+        target = [device_class.casefold(), instance_id.casefold()]
+        return any(
+            part.removeprefix("_??_") == "usbstor" and parts[index + 1:index + 3] == target
+            for index, part in enumerate(parts)
+        )
+
+    wpd_devices = []
+    try:
+        wpd_key = reg.open(f"{control_set}\\Enum\\SWD\\WPDBUSENUM")
+        for device in wpd_key.subkeys():
+            try:
+                values = device_values(device)
+                wpd_devices.append({
+                    "instance_id": device.name(),
+                    "key_path": device.path(),
+                    "friendly_name": values.get("friendlyname"),
+                    "manufacturer": values.get("mfg"),
+                    "device_desc": values.get("devicedesc"),
+                    "container_id": values.get("containerid"),
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
     # USBSTOR devices
     try:
         usbstor_path = f"{control_set}\\Enum\\USBSTOR"
@@ -498,18 +721,68 @@ def get_usb_devices(hive_path: str | Path) -> list[dict[str, Any]]:
         
         for device_class in usbstor_key.subkeys():
             for device in device_class.subkeys():
+                instance_id = device.name()
                 device_info = {
                     "type": "USBSTOR",
                     "class": device_class.name(),
-                    "serial": device.name(),
+                    "serial": instance_id,
                     "friendly_name": None,
                     "first_connected": device.timestamp().isoformat() if device.timestamp() else None,
+                    "first_connected_source": "usb_stor_key_last_write",
+                    "instance_id": instance_id,
+                    "physical_serial": re.sub(r"&[0-9]+$", "", instance_id),
+                    "device_instance_path": f"USBSTOR\\{device_class.name()}\\{instance_id}",
                 }
-                
-                for value in device.values():
-                    if value.name() == "FriendlyName":
-                        device_info["friendly_name"] = parse_registry_value(value)["data"]
-                
+                values = device_values(device)
+                device_info.update({
+                    "friendly_name": values.get("friendlyname"),
+                    "manufacturer": values.get("mfg"),
+                    "device_desc": values.get("devicedesc"),
+                    "usb_stor_manufacturer": values.get("mfg"),
+                    "usb_stor_device_desc": values.get("devicedesc"),
+                    "container_id": values.get("containerid"),
+                })
+                container_id = container_identity(device_info["container_id"])
+                correlated = []
+                for wpd in wpd_devices:
+                    match_sources = []
+                    if instance_path_matches(wpd["instance_id"], device_class.name(), instance_id):
+                        match_sources.append("instance_path")
+                    if container_id and container_identity(wpd["container_id"]) == container_id:
+                        match_sources.append("container_id")
+                    if match_sources:
+                        correlated.append({**wpd, "match_sources": match_sources})
+                correlated.sort(key=lambda item: (
+                    "instance_path" not in item["match_sources"],
+                    not bool(item["friendly_name"]),
+                    item["instance_id"].casefold(),
+                ))
+                device_info["wpd_devices"] = correlated
+                device_info["wpd_friendly_names"] = list(dict.fromkeys(
+                    item["friendly_name"] for item in correlated
+                    if isinstance(item["friendly_name"], str) and item["friendly_name"]
+                ))
+                device_info["device_name"] = next(iter(device_info["wpd_friendly_names"]), None)
+                if device_info["device_name"] is None:
+                    device_info["device_name"] = device_info["friendly_name"]
+                for field in ("manufacturer", "device_desc"):
+                    current_value = device_info[field]
+                    if current_value is None or (
+                        isinstance(current_value, str) and current_value.startswith("@")
+                    ):
+                        readable_wpd_value = next((
+                            item[field] for item in correlated
+                            if "instance_path" in item["match_sources"]
+                            and isinstance(item[field], str) and item[field]
+                            and not item[field].startswith("@")
+                        ), None)
+                        if readable_wpd_value is not None:
+                            device_info[field] = readable_wpd_value
+                for field in ("manufacturer", "device_desc", "container_id"):
+                    if device_info[field] is None:
+                        device_info[field] = next(
+                            (item[field] for item in correlated if item[field] is not None), None,
+                        )
                 results.append(device_info)
                 
     except Exception:

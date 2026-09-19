@@ -12,6 +12,7 @@ from .evtx_parser import (
 from .registry_parser import (
     get_registry_key,
     search_registry_values,
+    query_registry_values,
     get_run_keys,
     get_winlogon_persistence,
     get_services,
@@ -170,6 +171,7 @@ __all__ = [
     # Registry
     "get_registry_key",
     "search_registry_values",
+    "query_registry_values",
     "get_run_keys",
     "get_winlogon_persistence",
     "get_services",

@@ -20,6 +20,7 @@ from .parsers import (
     get_event_id_description,
     get_registry_key,
     search_registry_values,
+    query_registry_values,
     get_run_keys,
     get_winlogon_persistence,
     get_services,
@@ -269,6 +270,25 @@ def json_response(data: Any, max_chars: int = MAX_RESPONSE_CHARS) -> str:
     return json.dumps(truncated_data, default=str)
 
 
+def registry_query_response(data: dict[str, Any], max_chars: int = MAX_RESPONSE_CHARS) -> str:
+    """Fit whole query rows to the response budget without invalidating pagination."""
+    page = {**data, "results": list(data["results"])}
+    while True:
+        encoded = json.dumps(page, default=str)
+        if len(encoded) <= max_chars:
+            return encoded
+        if len(page["results"]) <= 1:
+            raise ValueError(
+                "A registry query row exceeds the response size limit; "
+                "use fields to project smaller values (for example name and key_path)"
+            )
+        page["results"].pop()
+        page["returned"] = len(page["results"])
+        page["next_offset"] = page["offset"] + page["returned"]
+        page["truncated"] = True
+        page["response_size_limited"] = True
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available forensics tools"""
@@ -396,6 +416,55 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="registry_query",
+            description=(
+                "Query registry values with exact, substring, or regex matching, subtree scope, "
+                "field projection, and pagination. Returns results and total_matched over the "
+                "readable subtree, with read diagnostics. Follow next_offset for the next page."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "hive_path": {"type": "string"},
+                    "pattern": {"type": "string"},
+                    "match_mode": {
+                        "type": "string", "enum": ["substring", "exact", "regex"],
+                        "default": "substring",
+                    },
+                    "case_sensitive": {"type": "boolean", "default": False},
+                    "search_names": {"type": "boolean", "default": True},
+                    "search_data": {"type": "boolean", "default": True},
+                    "key_path_prefix": {
+                        "type": "string",
+                        "description": "Whole subtree key, hive-relative or including root name",
+                    },
+                    "offset": {"type": "integer", "minimum": 0, "default": 0},
+                    "limit": {
+                        "type": "integer", "minimum": 1, "maximum": 1000,
+                        "default": MAX_REGISTRY_RESULTS,
+                    },
+                    "fields": {
+                        "type": "array", "minItems": 1, "uniqueItems": True,
+                        "items": {
+                            "type": "string",
+                            "enum": ["name", "type", "data", "data_raw", "data_utc", "key_path"],
+                        },
+                        "description": (
+                            "Return only selected fields; missing optional fields are omitted"
+                        ),
+                    },
+                    "diagnostic_limit": {
+                        "type": "integer", "minimum": 0, "maximum": 20, "default": 5,
+                        "description": (
+                            "Maximum read-error details; read_errors always counts all errors"
+                        ),
+                    },
+                },
+                "required": ["hive_path", "pattern"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
             name="registry_get_persistence",
             description="Get persistence mechanisms (Run keys, Winlogon values, services) from registry.",
             inputSchema={
@@ -419,7 +488,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="registry_get_usb_history",
-            description="Get USB device history from SYSTEM hive.",
+            description=(
+                "Get USBSTOR device identities and WPD names from SYSTEM hive. "
+                "first_connected is the legacy USBSTOR key last-write timestamp."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {"system_hive": {"type": "string"}},
@@ -2135,6 +2207,21 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> str:
             limit=args.get("limit", MAX_REGISTRY_RESULTS),
         )
         return json_response(result)
+
+    elif name == "registry_query":
+        result = query_registry_values(
+            args["hive_path"], args["pattern"],
+            search_names=args.get("search_names", True),
+            search_data=args.get("search_data", True),
+            case_sensitive=args.get("case_sensitive", False),
+            match_mode=args.get("match_mode", "substring"),
+            key_path_prefix=args.get("key_path_prefix"),
+            offset=args.get("offset", 0),
+            limit=args.get("limit", MAX_REGISTRY_RESULTS),
+            fields=args.get("fields"),
+            diagnostic_limit=args.get("diagnostic_limit", 5),
+        )
+        return registry_query_response(result)
     
     elif name == "registry_get_persistence":
         result = {"run_keys": [], "services": [], "winlogon": None}
